@@ -3,6 +3,7 @@
 #include <X11/keysym.h>
 #include <argp.h>
 #include <mpv/client.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -159,7 +160,7 @@ int main(int argc, char *argv[]) {
 
   mpv_handle *mpv = setup_mpv(root_window, arguments.files[0], arguments.hwdec);
   struct MpvState mpv_state = {
-      .file = argv[1],
+      .file = arguments.files[0],
       .speed = 1.0,
       .speed_updated_at = time_now(),
       .pinged_at = time_now(),
@@ -178,12 +179,12 @@ int main(int argc, char *argv[]) {
       switch (event.type) {
       case ClientMessage:
         if (event.xclient.data.l[0] == wm_delete_window) {
-          printf("quitting: \n");
+          fprintf(stderr, "quitting: \n");
           quit = True;
         }
         break;
       case KeyPress: {
-        printf("KeyPress: %d\n", event.xkey.keycode);
+        fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
         if (event.xkey.keycode == XKeysymToKeycode(display, XK_q)) {
           quit = True;
         }
@@ -215,7 +216,7 @@ int main(int argc, char *argv[]) {
       }
       if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
         mpv_event_log_message *msg = mp_event->data;
-        printf("log: %s", msg->text);
+        fprintf(stderr, "mpv: %s", msg->text);
         continue;
       }
       if (mp_event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
@@ -224,13 +225,14 @@ int main(int argc, char *argv[]) {
           double *data = property->data;
           if (data) {
             ping = True;
-            // printf("property: %s: %f\n", MPV_PROPERTY_TIME_REMAINING, *data);
+            // fprintf(stderr,"property: %s: %f\n", MPV_PROPERTY_TIME_REMAINING,
+            // *data);
           }
         } else if (strcmp(property->name, MPV_PROPERTY_DEMUXER_CACHE_TIME)) {
           double *data = property->data;
           if (data) {
-            // printf("property: %s: %f\n", MPV_PROPERTY_DEMUXER_CACHE_TIME,
-            // *data);
+            // fprintf(stderr,"property: %s: %f\n",
+            // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
             if (*data > max_delay_s) {
               new_speed = 1.5;
@@ -241,7 +243,8 @@ int main(int argc, char *argv[]) {
         }
         continue;
       }
-      printf("unhandled mpv event: %s\n", mpv_event_name(mp_event->event_id));
+      fprintf(stderr, "unhandled mpv event: %s\n",
+              mpv_event_name(mp_event->event_id));
     }
 
     // MPV side effects

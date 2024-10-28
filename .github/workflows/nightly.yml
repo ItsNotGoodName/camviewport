@@ -1,0 +1,48 @@
+# yaml-language-server: https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/github-workflow.json
+name: Deploy Nightly
+on:
+  schedule:
+    - cron: "0 2 * * *" # run at 2 AM UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    outputs:
+      nightly: ${{ steps.nightly.outputs.nightly }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: nightly
+        name: Check if current branch is nightly
+        run: (git tag --points-at HEAD | grep -wq "nightly" && echo "nightly=true") || echo "nightly=false" >> $GITHUB_OUTPUT
+
+  nightly:
+    needs: [check]
+    if: ${{ needs.check.outputs.nightly == 'false' }}
+    permissions: write-all
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        run: |
+          sudo apt install -y libmpv-dev
+          make nightly
+          mkdir dist
+          cp camviewport dist/camviewport_Linux_X86_64
+
+      - name: Publish nightly
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete nightly --yes || true
+          git push origin :nightly || true
+          gh release create --prerelease --title "Nightly $(date +'%Y-%m-%d')" --notes "" --target $GITHUB_SHA nightly dist/*

@@ -5,6 +5,7 @@
 #include <X11/keysym.h>
 #include <argp.h>
 #include <mpv/client.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,23 +15,18 @@
 #define VERSION "development"
 #endif
 
-static void die(const char *msg) {
+void die(const char *msg) {
   fprintf(stderr, "%s\n", msg);
   exit(1);
 }
 
-static int time_now() { return (int)time(NULL); }
+int time_now() { return (int)time(NULL); }
 
 // X11
 
-static int on_x11_error(Display *d, XErrorEvent *e) {
+int on_x11_error(Display *d, XErrorEvent *e) {
   fprintf(stderr, "xlib: %d\n", e->error_code);
   return 0;
-}
-
-Display *open_display() {
-  XSetErrorHandler(on_x11_error);
-  return XOpenDisplay(NULL);
 }
 
 Window create_root_window(Display *display) {
@@ -46,12 +42,6 @@ Window create_root_window(Display *display) {
   XSelectInput(display, root_window, StructureNotifyMask | KeyPressMask);
 
   return root_window;
-}
-
-Window create_sub_window(Display *display, Window root_window) {
-  Window sub_window =
-      XCreateSimpleWindow(display, root_window, 0, 0, 0, 0, 0, 0, 0);
-  return sub_window;
 }
 
 Atom create_delete_window_atom(Display *display, Window window) {
@@ -90,6 +80,12 @@ mpv_handle *setup_mpv(Window window, char *hwdec) {
   mpv_request_log_messages(mpv, "info");
 
   return mpv;
+}
+
+void *shutdown_mpv(void *ptr) {
+  mpv_handle *mpv = ptr;
+  mpv_destroy(mpv);
+  return NULL;
 }
 
 // CLI
@@ -165,7 +161,9 @@ int main(int argc, char *argv[]) {
   if (arguments.files[0] == NULL)
     die("no media files specified");
 
-  Display *display = open_display();
+  XSetErrorHandler(on_x11_error);
+
+  Display *display = XOpenDisplay(NULL);
   if (display == NULL)
     die("failed to open display");
 
@@ -179,7 +177,8 @@ int main(int argc, char *argv[]) {
 
   struct State state = init_state(display, root_window);
 
-  int stream_count = arguments.file_count;
+  const int stream_count = arguments.file_count;
+
   struct StreamState stream_states[MAX_FILES] = {};
 
   {
@@ -225,7 +224,6 @@ int main(int argc, char *argv[]) {
       switch (event.type) {
       case ClientMessage:
         if (event.xclient.data.l[0] == wm_delete_window) {
-          fprintf(stderr, "quitting: \n");
           quit = True;
         }
         break;
@@ -308,7 +306,7 @@ int main(int argc, char *argv[]) {
         int err = mpv_set_property(stream_states[i].mpv, "speed",
                                    MPV_FORMAT_DOUBLE, &new_speed);
         if (err < 0)
-          fprintf(stderr, "failed to mpv set speed: code %d", err);
+          fprintf(stderr, "failed to mpv set speed: error %d", err);
         else {
           stream_states[i].speed = new_speed;
           stream_states[i].speed_updated_at = time_now();
@@ -318,7 +316,7 @@ int main(int argc, char *argv[]) {
         const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
         int err = mpv_command(stream_states[i].mpv, cmd) < 0;
         if (err < 0)
-          fprintf(stderr, "failed to reload mpv file: code %d", err);
+          fprintf(stderr, "failed to reload mpv file: error %d", err);
       }
       if (reload_file || ping)
         stream_states[i].pinged_at = time_now();
@@ -340,9 +338,15 @@ int main(int argc, char *argv[]) {
     clock_wait();
   }
 
+  // Concurrently shutdown all mpv handles
+  pthread_t *threads = malloc(stream_count * sizeof(pthread_t));
   for (int i = 0; i < stream_count; i++) {
-    mpv_destroy(stream_states[i].mpv);
+    pthread_create(&threads[i], NULL, shutdown_mpv, stream_states[i].mpv);
   }
+  for (int i = 0; i < stream_count; i++) {
+    pthread_join(threads[i], NULL);
+  }
+  free(threads);
 
   XCloseDisplay(display);
 

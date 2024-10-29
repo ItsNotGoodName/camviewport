@@ -67,6 +67,10 @@ mpv_handle *setup_mpv(Window window, char *hwdec) {
   mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &window);
   mpv_set_option_string(mpv, "profile", "low-latency");
   mpv_set_option_string(mpv, "cache", "now");
+  mpv_set_option_string(mpv, "input-cursor",
+                        "no"); // FIXME: this causes the cursor disappears on a
+                               // sub window when alt-tab is pressed, this only
+                               // happens to sub window the cursor is hovering
   if (hwdec)
     mpv_set_option_string(mpv, "hwdec", hwdec);
 
@@ -129,6 +133,8 @@ static int parser(int key, char *arg, struct argp_state *state) {
 struct State {
   int width;
   int height;
+  Bool fullscreen;
+  Window fullscreen_window;
 };
 
 struct State init_state(Display *display, Window root_window) {
@@ -189,7 +195,9 @@ int main(int argc, char *argv[]) {
       struct LayoutPane pane = layout_grid_pane(layout, i);
       Window window = XCreateSimpleWindow(display, root_window, pane.x, pane.y,
                                           pane.width, pane.height, 0, 0, 0);
+      XSelectInput(display, window, ButtonPressMask);
       XMapWindow(display, window);
+      XSync(display, 0);
 
       mpv_handle *mpv = setup_mpv(window, arguments.hwdec);
 
@@ -216,6 +224,7 @@ int main(int argc, char *argv[]) {
     clock_start();
 
     Bool redraw = False;
+    Bool sync = False;
 
     // X11 events
     while (XPending(display)) {
@@ -239,6 +248,17 @@ int main(int argc, char *argv[]) {
           state.height = event.xconfigure.height;
           redraw = True;
         }
+        break;
+      case ButtonPress:
+        fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
+        if (state.fullscreen) {
+          state.fullscreen = False;
+        } else {
+          state.fullscreen = True;
+          state.fullscreen_window = event.xbutton.window;
+        }
+        redraw = True;
+        sync = True;
         break;
       default:
         fprintf(stderr, "unhandled X11 event: %d\n", event.type);
@@ -312,7 +332,8 @@ int main(int argc, char *argv[]) {
           stream_states[i].speed_updated_at = time_now();
         }
       }
-      if (reload_file) {
+      if (reload_file && (!state.fullscreen ||
+                          stream_states[i].window == state.fullscreen_window)) {
         const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
         int err = mpv_command(stream_states[i].mpv, cmd) < 0;
         if (err < 0)
@@ -320,7 +341,40 @@ int main(int argc, char *argv[]) {
       }
       if (reload_file || ping)
         stream_states[i].pinged_at = time_now();
-      if (redraw) {
+      if (sync) {
+        if (!state.fullscreen ||
+            stream_states[i].window == state.fullscreen_window) {
+          const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
+          int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+          if (err < 0)
+            fprintf(stderr, "failed to play mpv file: error %d", err);
+        } else {
+          const char *cmd[] = {"stop", NULL};
+          int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+          if (err < 0)
+            fprintf(stderr, "failed to stop mpv file: error %d", err);
+        }
+      }
+    }
+
+    // X11 side effects
+    if (redraw) {
+      if (state.fullscreen) {
+        for (int i = 0; i < stream_count; i++) {
+          if (stream_states[i].window == state.fullscreen_window) {
+            XWindowAttributes root;
+            XGetWindowAttributes(display, root_window, &root);
+            XWindowChanges changes = {
+                .x = 0, .y = 0, .width = root.width, .height = root.height};
+            XConfigureWindow(display, stream_states[i].window,
+                             CWX | CWY | CWWidth | CWHeight, &changes);
+            XMapWindow(display, stream_states[i].window);
+
+          } else {
+            XUnmapWindow(display, stream_states[i].window);
+          }
+        }
+      } else {
         struct LayoutGrid layout =
             layout_grid_new(state.width, state.height, stream_count);
         for (int i = 0; i < stream_count; i++) {
@@ -331,6 +385,7 @@ int main(int argc, char *argv[]) {
                                     .height = pane.height};
           XConfigureWindow(display, stream_states[i].window,
                            CWX | CWY | CWWidth | CWHeight, &changes);
+          XMapWindow(display, stream_states[i].window);
         }
       }
     }

@@ -1,5 +1,4 @@
 #pragma once
-#include <stdint.h>
 
 struct LayoutPane {
   int x;
@@ -16,6 +15,6 @@ struct LayoutGrid {
   int columns;
 };
 
-struct LayoutGrid layout_grid(int width, int height, int count);
+struct LayoutGrid layout_grid_new(int width, int height, int count);
 
-struct LayoutPane layout_grid_pane(struct LayoutGrid, int index);
+struct LayoutPane layout_grid_pane(struct LayoutGrid layout_grid, int index);

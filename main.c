@@ -1,4 +1,6 @@
 #include "clock.h"
+#include "layout.h"
+#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <argp.h>
@@ -67,14 +69,7 @@ const double max_delay_s = 0.5;
 const double min_delay_s = 0.1;
 const int timeout_s = 5;
 
-struct MpvState {
-  char *file;
-  double speed;
-  int speed_updated_at;
-  int pinged_at;
-};
-
-mpv_handle *setup_mpv(Window window, char *file, char *hwdec) {
+mpv_handle *setup_mpv(Window window, char *hwdec) {
   mpv_handle *mpv = mpv_create();
   if (mpv == NULL)
     die("mpv context failed");
@@ -94,10 +89,6 @@ mpv_handle *setup_mpv(Window window, char *file, char *hwdec) {
 
   mpv_request_log_messages(mpv, "info");
 
-  const char *cmd[] = {"loadfile", file, NULL};
-  if (mpv_command(mpv, cmd) < 0)
-    die("mpv failed to play file");
-
   return mpv;
 }
 
@@ -107,6 +98,7 @@ mpv_handle *setup_mpv(Window window, char *file, char *hwdec) {
 
 struct Arguments {
   char *hwdec;
+  int file_count;
   char *files[MAX_FILES];
 };
 
@@ -129,6 +121,7 @@ static int parser(int key, char *arg, struct argp_state *state) {
     for (int i = 0; i < MAX_FILES; i++) {
       if (arguments->files[i] == NULL) {
         arguments->files[i] = arg;
+        arguments->file_count++;
         break;
       }
     }
@@ -137,8 +130,34 @@ static int parser(int key, char *arg, struct argp_state *state) {
   return 0;
 }
 
+struct State {
+  int width;
+  int height;
+};
+
+struct State init_state(Display *display, Window root_window) {
+  XWindowAttributes a;
+  if (XGetWindowAttributes(display, root_window, &a) < 0)
+    die("failed to get root window size");
+
+  struct State state = {
+      .width = a.width,
+      .height = a.height,
+  };
+  return state;
+}
+
+struct StreamState {
+  Window window;
+  mpv_handle *mpv;
+  char *file;
+  double speed;
+  int speed_updated_at;
+  int pinged_at;
+};
+
 int main(int argc, char *argv[]) {
-  struct Arguments arguments;
+  struct Arguments arguments = {};
 
   struct argp argp = {options, parser, 0, 0};
   argp_parse(&argp, argc, argv, 0, 0, &arguments);
@@ -158,19 +177,46 @@ int main(int argc, char *argv[]) {
 
   XMapWindow(display, root_window);
 
-  mpv_handle *mpv = setup_mpv(root_window, arguments.files[0], arguments.hwdec);
-  struct MpvState mpv_state = {
-      .file = arguments.files[0],
-      .speed = 1.0,
-      .speed_updated_at = time_now(),
-      .pinged_at = time_now(),
-  };
+  struct State state = init_state(display, root_window);
+
+  int stream_count = arguments.file_count;
+  struct StreamState stream_states[MAX_FILES] = {};
+
+  {
+    struct LayoutGrid layout =
+        layout_grid_new(state.width, state.height, stream_count);
+
+    for (int i = 0; i < stream_count; i++) {
+      struct LayoutPane pane = layout_grid_pane(layout, i);
+      Window window = XCreateSimpleWindow(display, root_window, pane.x, pane.y,
+                                          pane.width, pane.height, 0, 0, 0);
+      XMapWindow(display, window);
+
+      mpv_handle *mpv = setup_mpv(window, arguments.hwdec);
+
+      const char *cmd[] = {"loadfile", arguments.files[i], NULL};
+      if (mpv_command(mpv, cmd) < 0)
+        die("mpv failed to play file");
+
+      struct StreamState stream_state = {
+          .window = window,
+          .mpv = mpv,
+          .file = arguments.files[i],
+          .speed = 1.0,
+          .speed_updated_at = time_now(),
+          .pinged_at = time_now(),
+      };
+      stream_states[i] = stream_state;
+    }
+  }
 
   clock_set_fps(60);
 
   int quit = False;
   while (!quit) {
     clock_start();
+
+    Bool redraw = False;
 
     // X11 events
     while (XPending(display)) {
@@ -189,83 +235,114 @@ int main(int argc, char *argv[]) {
           quit = True;
         }
         break;
+      case ConfigureNotify:
+        if (event.xconfigure.window == root_window) {
+          state.width = event.xconfigure.width;
+          state.height = event.xconfigure.height;
+          redraw = True;
+        }
+        break;
+      default:
+        fprintf(stderr, "unhandled X11 event: %d\n", event.type);
       }
       }
     }
 
-    double new_speed = 0;
-    Bool ping = False;
-    Bool reload_file = False;
+    for (int i = 0; i < arguments.file_count; i++) {
+      double new_speed = 0;
+      Bool ping = False;
+      Bool reload_file = False;
 
-    // MPV speed timeout
-    if (time_now() > mpv_state.speed_updated_at + 5)
-      new_speed = 1.0;
+      // Reset speed if stuck
+      if (time_now() > stream_states[i].speed_updated_at + 5)
+        new_speed = 1.0;
 
-    // MPV watchdog
-    if (time_now() > (mpv_state.pinged_at + timeout_s))
-      reload_file = True;
+      // Reload locked up stream
+      if (time_now() > (stream_states[i].pinged_at + timeout_s))
+        reload_file = True;
 
-    // MPV events
-    while (True) {
-      mpv_event *mp_event = mpv_wait_event(mpv, 0);
-      if (mp_event->event_id == MPV_EVENT_NONE)
-        break;
-      if (mp_event->event_id == MPV_EVENT_SHUTDOWN) {
-        quit = True;
-        break;
-      }
-      if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
-        mpv_event_log_message *msg = mp_event->data;
-        fprintf(stderr, "mpv: %s", msg->text);
-        continue;
-      }
-      if (mp_event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
-        mpv_event_property *property = mp_event->data;
-        if (strcmp(property->name, MPV_PROPERTY_TIME_REMAINING)) {
-          double *data = property->data;
-          if (data) {
-            ping = True;
-            // fprintf(stderr,"property: %s: %f\n", MPV_PROPERTY_TIME_REMAINING,
-            // *data);
-          }
-        } else if (strcmp(property->name, MPV_PROPERTY_DEMUXER_CACHE_TIME)) {
-          double *data = property->data;
-          if (data) {
-            // fprintf(stderr,"property: %s: %f\n",
-            // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
+      // MPV events
+      while (True) {
+        mpv_event *mp_event = mpv_wait_event(stream_states[i].mpv, 0);
+        if (mp_event->event_id == MPV_EVENT_NONE)
+          break;
+        if (mp_event->event_id == MPV_EVENT_SHUTDOWN) {
+          quit = True;
+          break;
+        }
+        if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
+          mpv_event_log_message *msg = mp_event->data;
+          fprintf(stderr, "mpv: %s", msg->text);
+          continue;
+        }
+        if (mp_event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
+          mpv_event_property *property = mp_event->data;
+          if (strcmp(property->name, MPV_PROPERTY_TIME_REMAINING)) {
+            double *data = property->data;
+            if (data) {
+              ping = True;
+              // fprintf(stderr,"property: %s: %f\n",
+              // MPV_PROPERTY_TIME_REMAINING, *data);
+            }
+          } else if (strcmp(property->name, MPV_PROPERTY_DEMUXER_CACHE_TIME)) {
+            double *data = property->data;
+            if (data) {
+              // fprintf(stderr,"property: %s: %f\n",
+              // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
-            if (*data > max_delay_s) {
-              new_speed = 1.5;
-            } else if (*data < min_delay_s) {
-              new_speed = 1.0;
+              if (*data > max_delay_s) {
+                new_speed = 1.5;
+              } else if (*data < min_delay_s) {
+                new_speed = 1.0;
+              }
             }
           }
+          continue;
         }
-        continue;
+        fprintf(stderr, "unhandled mpv event: %s\n",
+                mpv_event_name(mp_event->event_id));
       }
-      fprintf(stderr, "unhandled mpv event: %s\n",
-              mpv_event_name(mp_event->event_id));
-    }
 
-    // MPV side effects
-    if (new_speed && new_speed != mpv_state.speed) {
-      if (mpv_set_property(mpv, "speed", MPV_FORMAT_DOUBLE, &new_speed) < 0)
-        die("mpv failed set speed");
-      mpv_state.speed = new_speed;
-      mpv_state.speed_updated_at = time_now();
+      // MPV side effects
+      if (new_speed && new_speed != stream_states[i].speed) {
+        int err = mpv_set_property(stream_states[i].mpv, "speed",
+                                   MPV_FORMAT_DOUBLE, &new_speed);
+        if (err < 0)
+          fprintf(stderr, "failed to mpv set speed: code %d", err);
+        else {
+          stream_states[i].speed = new_speed;
+          stream_states[i].speed_updated_at = time_now();
+        }
+      }
+      if (reload_file) {
+        const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
+        int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+        if (err < 0)
+          fprintf(stderr, "failed to reload mpv file: code %d", err);
+      }
+      if (reload_file || ping)
+        stream_states[i].pinged_at = time_now();
+      if (redraw) {
+        struct LayoutGrid layout =
+            layout_grid_new(state.width, state.height, stream_count);
+        for (int i = 0; i < stream_count; i++) {
+          struct LayoutPane pane = layout_grid_pane(layout, i);
+          XWindowChanges changes = {.x = pane.x,
+                                    .y = pane.y,
+                                    .width = pane.width,
+                                    .height = pane.height};
+          XConfigureWindow(display, stream_states[i].window,
+                           CWX | CWY | CWWidth | CWHeight, &changes);
+        }
+      }
     }
-    if (reload_file) {
-      const char *cmd[] = {"loadfile", mpv_state.file, NULL};
-      if (mpv_command(mpv, cmd) < 0)
-        die("mpv failed to reload file");
-    }
-    if (reload_file || ping)
-      mpv_state.pinged_at = time_now();
 
     clock_wait();
   }
 
-  mpv_destroy(mpv);
+  for (int i = 0; i < stream_count; i++) {
+    mpv_destroy(stream_states[i].mpv);
+  }
 
   XCloseDisplay(display);
 

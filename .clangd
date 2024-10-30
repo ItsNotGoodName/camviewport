@@ -1,0 +1,4 @@
+CompileFlags:
+  Add:
+    - -std=gnu99
+    - -Wall

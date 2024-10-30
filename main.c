@@ -12,54 +12,115 @@
 #include <time.h>
 
 #ifndef VERSION
-#define VERSION "development"
+#define VERSION "dev"
 #endif
 
-void die(const char *msg) {
+#define MAX_STREAMS 32
+
+typedef struct {
+  Window window;
+  mpv_handle *mpv;
+  char *file;
+  double speed;
+  int speed_updated_at;
+  int pinged_at;
+} StreamState;
+
+typedef struct {
+  Window window;
+  int width;
+  int height;
+  Bool fullscreen;
+  Window fullscreen_window;
+  int stream_count;
+  StreamState streams[MAX_STREAMS];
+} State;
+
+typedef struct {
+  char *hwdec;
+  int file_count;
+  char *files[MAX_STREAMS];
+} Config;
+
+const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
+const char *MPV_PROPERTY_TIME_REMAINING = "time-remaining";
+const double MPV_MAX_DELAY_S = 0.5;
+const double MPV_MIN_DISPLAY_S = 0.1;
+const int MPV_TIMEOUT_S = 5;
+
+static Display *display;
+static Atom wm_delete_window;
+static State *state;
+
+static void die(const char *msg) {
   fprintf(stderr, "%s\n", msg);
   exit(1);
 }
 
-int time_now() { return (int)time(NULL); }
+static int time_now() { return (int)time(NULL); }
 
-// X11
-
-int on_x11_error(Display *d, XErrorEvent *e) {
+static int on_x11_error(Display *d, XErrorEvent *e) {
   fprintf(stderr, "xlib: %d\n", e->error_code);
   return 0;
 }
 
-Window create_root_window(Display *display) {
+void setup() {
+  XSetErrorHandler(on_x11_error);
+
+  display = XOpenDisplay(NULL);
+  if (display == NULL)
+    die("failed to open display");
+
   Window root = XDefaultRootWindow(display);
 
   XWindowAttributes root_window_attribute;
-  XGetWindowAttributes(display, root, &root_window_attribute);
+  if (XGetWindowAttributes(display, root, &root_window_attribute) < 0)
+    die("failed to get root window size");
 
-  Window root_window =
+  Window window =
       XCreateSimpleWindow(display, root, 0, 0, root_window_attribute.width,
                           root_window_attribute.height, 0, 0, 0);
+  if (window == 0)
+    die("failed to create window");
 
-  XSelectInput(display, root_window, StructureNotifyMask | KeyPressMask);
+  XSelectInput(display, window, StructureNotifyMask | KeyPressMask);
 
-  return root_window;
-}
-
-Atom create_delete_window_atom(Display *display, Window window) {
-  Atom wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
+  wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
   XSetWMProtocols(display, window, &wm_delete_window, 1);
-  return wm_delete_window;
+
+  XMapWindow(display, window);
+
+  XWindowAttributes window_attribute;
+  if (XGetWindowAttributes(display, window, &window_attribute) < 0)
+    die("failed to get window size");
+
+  state = calloc(1, sizeof(State));
+  state->window = window;
+  state->width = window_attribute.width;
+  state->height = window_attribute.height;
 }
 
-// MPV
+void *_destroy(void *ptr) {
+  mpv_handle *mpv = ptr;
+  mpv_destroy(mpv);
+  return NULL;
+}
 
-const char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
-const char *MPV_PROPERTY_TIME_REMAINING = "time-remaining";
+void destory() {
+  // Concurrently shutdown all mpv handles
+  pthread_t *threads = malloc(state->stream_count * sizeof(pthread_t));
+  for (int i = 0; i < state->stream_count; i++) {
+    pthread_create(&threads[i], NULL, _destroy, state->streams[i].mpv);
+  }
+  for (int i = 0; i < state->stream_count; i++) {
+    pthread_join(threads[i], NULL);
+  }
+  free(threads);
 
-const double max_delay_s = 0.5;
-const double min_delay_s = 0.1;
-const int timeout_s = 5;
+  XCloseDisplay(display);
+}
 
-mpv_handle *setup_mpv(Window window, char *hwdec) {
+mpv_handle *create_mpv(Window window, char *hwdec) {
   mpv_handle *mpv = mpv_create();
   if (mpv == NULL)
     die("mpv context failed");
@@ -86,42 +147,55 @@ mpv_handle *setup_mpv(Window window, char *hwdec) {
   return mpv;
 }
 
-void *shutdown_mpv(void *ptr) {
-  mpv_handle *mpv = ptr;
-  mpv_destroy(mpv);
-  return NULL;
+void setup_streams(Config config) {
+  struct LayoutGrid layout =
+      layout_grid_new(state->width, state->height, config.file_count);
+
+  for (int i = 0; i < config.file_count; i++) {
+    struct LayoutPane pane = layout_grid_pane(layout, i);
+    Window window = XCreateSimpleWindow(display, state->window, pane.x, pane.y,
+                                        pane.width, pane.height, 0, 0, 0);
+    XSelectInput(display, window, ButtonPressMask);
+    XMapWindow(display, window);
+    XSync(display, 0);
+
+    mpv_handle *mpv = create_mpv(window, config.hwdec);
+
+    const char *cmd[] = {"loadfile", config.files[i], NULL};
+    if (mpv_command(mpv, cmd) < 0)
+      die("mpv failed to play file");
+
+    state->streams[i].window = window;
+    state->streams[i].mpv = mpv;
+    state->streams[i].file = config.files[i];
+    state->streams[i].speed = 1.0;
+    state->streams[i].speed_updated_at = time_now();
+    state->streams[i].pinged_at = time_now();
+  }
+
+  state->stream_count = config.file_count;
 }
 
-// CLI
-
-#define MAX_FILES 32
-
-struct Arguments {
-  char *hwdec;
-  int file_count;
-  char *files[MAX_FILES];
-};
-
-static struct argp_option options[] = {
+static struct argp_option cli_options[] = {
     {"version", 'v', 0, 0, "Show version"},
     {"hwdec", 1, "HWDEC", 0, "Set hwdec mpv option"},
     {0}};
 
-static int parser(int key, char *arg, struct argp_state *state) {
-  struct Arguments *arguments = state->input;
+static int cli_parser(int key, char *arg, struct argp_state *state) {
+  Config *config = state->input;
 
   switch (key) {
   case 'v':
     printf("%s\n", VERSION);
     exit(0);
   case 1:
-    arguments->hwdec = arg;
+    config->hwdec = arg;
     break;
   case ARGP_KEY_ARG:
-    for (int i = 0; i < MAX_FILES; i++) {
-      if (arguments->files[i] == NULL) {
-        arguments->files[i] = arg;
-        arguments->file_count++;
+    for (int i = 0; i < MAX_STREAMS; i++) {
+      if (config->files[i] == NULL) {
+        config->files[i] = arg;
+        config->file_count++;
         break;
       }
     }
@@ -130,92 +204,22 @@ static int parser(int key, char *arg, struct argp_state *state) {
   return 0;
 }
 
-struct State {
-  int width;
-  int height;
-  Bool fullscreen;
-  Window fullscreen_window;
-};
+void parse_config(int argc, char *argv[], Config *config) {
+  struct argp argp = {cli_options, cli_parser, 0, 0};
+  argp_parse(&argp, argc, argv, 0, 0, config);
 
-struct State init_state(Display *display, Window root_window) {
-  XWindowAttributes a;
-  if (XGetWindowAttributes(display, root_window, &a) < 0)
-    die("failed to get root window size");
-
-  struct State state = {
-      .width = a.width,
-      .height = a.height,
-  };
-  return state;
+  if (config->files[0] == NULL)
+    die("no media files specified");
 }
 
-struct StreamState {
-  Window window;
-  mpv_handle *mpv;
-  char *file;
-  double speed;
-  int speed_updated_at;
-  int pinged_at;
-};
-
 int main(int argc, char *argv[]) {
-  struct Arguments arguments = {};
+  Config config = {};
 
-  struct argp argp = {options, parser, 0, 0};
-  argp_parse(&argp, argc, argv, 0, 0, &arguments);
+  parse_config(argc, argv, &config);
 
-  if (arguments.files[0] == NULL)
-    die("no media files specified");
+  setup();
 
-  XSetErrorHandler(on_x11_error);
-
-  Display *display = XOpenDisplay(NULL);
-  if (display == NULL)
-    die("failed to open display");
-
-  Window root_window = create_root_window(display);
-  if (root_window == 0)
-    die("failed to create window");
-
-  Atom wm_delete_window = create_delete_window_atom(display, root_window);
-
-  XMapWindow(display, root_window);
-
-  struct State state = init_state(display, root_window);
-
-  const int stream_count = arguments.file_count;
-
-  struct StreamState stream_states[MAX_FILES] = {};
-
-  {
-    struct LayoutGrid layout =
-        layout_grid_new(state.width, state.height, stream_count);
-
-    for (int i = 0; i < stream_count; i++) {
-      struct LayoutPane pane = layout_grid_pane(layout, i);
-      Window window = XCreateSimpleWindow(display, root_window, pane.x, pane.y,
-                                          pane.width, pane.height, 0, 0, 0);
-      XSelectInput(display, window, ButtonPressMask);
-      XMapWindow(display, window);
-      XSync(display, 0);
-
-      mpv_handle *mpv = setup_mpv(window, arguments.hwdec);
-
-      const char *cmd[] = {"loadfile", arguments.files[i], NULL};
-      if (mpv_command(mpv, cmd) < 0)
-        die("mpv failed to play file");
-
-      struct StreamState stream_state = {
-          .window = window,
-          .mpv = mpv,
-          .file = arguments.files[i],
-          .speed = 1.0,
-          .speed_updated_at = time_now(),
-          .pinged_at = time_now(),
-      };
-      stream_states[i] = stream_state;
-    }
-  }
+  setup_streams(config);
 
   clock_set_fps(60);
 
@@ -243,19 +247,19 @@ int main(int argc, char *argv[]) {
         }
         break;
       case ConfigureNotify:
-        if (event.xconfigure.window == root_window) {
-          state.width = event.xconfigure.width;
-          state.height = event.xconfigure.height;
+        if (event.xconfigure.window == state->window) {
+          state->width = event.xconfigure.width;
+          state->height = event.xconfigure.height;
           redraw = True;
         }
         break;
       case ButtonPress:
         fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
-        if (state.fullscreen) {
-          state.fullscreen = False;
+        if (state->fullscreen) {
+          state->fullscreen = False;
         } else {
-          state.fullscreen = True;
-          state.fullscreen_window = event.xbutton.window;
+          state->fullscreen = True;
+          state->fullscreen_window = event.xbutton.window;
         }
         redraw = True;
         sync = True;
@@ -266,22 +270,22 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    for (int i = 0; i < arguments.file_count; i++) {
+    for (int i = 0; i < config.file_count; i++) {
       double new_speed = 0;
       Bool ping = False;
       Bool reload_file = False;
 
       // Reset speed if stuck
-      if (time_now() > stream_states[i].speed_updated_at + 5)
+      if (time_now() > state->streams[i].speed_updated_at + 5)
         new_speed = 1.0;
 
       // Reload locked up stream
-      if (time_now() > (stream_states[i].pinged_at + timeout_s))
+      if (time_now() > (state->streams[i].pinged_at + MPV_TIMEOUT_S))
         reload_file = True;
 
       // MPV events
       while (True) {
-        mpv_event *mp_event = mpv_wait_event(stream_states[i].mpv, 0);
+        mpv_event *mp_event = mpv_wait_event(state->streams[i].mpv, 0);
         if (mp_event->event_id == MPV_EVENT_NONE)
           break;
         if (mp_event->event_id == MPV_EVENT_SHUTDOWN) {
@@ -308,9 +312,9 @@ int main(int argc, char *argv[]) {
               // fprintf(stderr,"property: %s: %f\n",
               // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
-              if (*data > max_delay_s) {
+              if (*data > MPV_MAX_DELAY_S) {
                 new_speed = 1.5;
-              } else if (*data < min_delay_s) {
+              } else if (*data < MPV_MIN_DISPLAY_S) {
                 new_speed = 1.0;
               }
             }
@@ -322,35 +326,35 @@ int main(int argc, char *argv[]) {
       }
 
       // MPV side effects
-      if (new_speed && new_speed != stream_states[i].speed) {
-        int err = mpv_set_property(stream_states[i].mpv, "speed",
+      if (new_speed && new_speed != state->streams[i].speed) {
+        int err = mpv_set_property(state->streams[i].mpv, "speed",
                                    MPV_FORMAT_DOUBLE, &new_speed);
         if (err < 0)
           fprintf(stderr, "failed to mpv set speed: error %d", err);
         else {
-          stream_states[i].speed = new_speed;
-          stream_states[i].speed_updated_at = time_now();
+          state->streams[i].speed = new_speed;
+          state->streams[i].speed_updated_at = time_now();
         }
       }
-      if (reload_file && (!state.fullscreen ||
-                          stream_states[i].window == state.fullscreen_window)) {
-        const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
-        int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+      if (reload_file && (!state->fullscreen || state->streams[i].window ==
+                                                    state->fullscreen_window)) {
+        const char *cmd[] = {"loadfile", state->streams[i].file, NULL};
+        int err = mpv_command(state->streams[i].mpv, cmd) < 0;
         if (err < 0)
           fprintf(stderr, "failed to reload mpv file: error %d", err);
       }
       if (reload_file || ping)
-        stream_states[i].pinged_at = time_now();
+        state->streams[i].pinged_at = time_now();
       if (sync) {
-        if (!state.fullscreen ||
-            stream_states[i].window == state.fullscreen_window) {
-          const char *cmd[] = {"loadfile", stream_states[i].file, NULL};
-          int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+        if (!state->fullscreen ||
+            state->streams[i].window == state->fullscreen_window) {
+          const char *cmd[] = {"loadfile", state->streams[i].file, NULL};
+          int err = mpv_command(state->streams[i].mpv, cmd) < 0;
           if (err < 0)
             fprintf(stderr, "failed to play mpv file: error %d", err);
         } else {
           const char *cmd[] = {"stop", NULL};
-          int err = mpv_command(stream_states[i].mpv, cmd) < 0;
+          int err = mpv_command(state->streams[i].mpv, cmd) < 0;
           if (err < 0)
             fprintf(stderr, "failed to stop mpv file: error %d", err);
         }
@@ -359,33 +363,33 @@ int main(int argc, char *argv[]) {
 
     // X11 side effects
     if (redraw) {
-      if (state.fullscreen) {
-        for (int i = 0; i < stream_count; i++) {
-          if (stream_states[i].window == state.fullscreen_window) {
+      if (state->fullscreen) {
+        for (int i = 0; i < state->stream_count; i++) {
+          if (state->streams[i].window == state->fullscreen_window) {
             XWindowAttributes root;
-            XGetWindowAttributes(display, root_window, &root);
+            XGetWindowAttributes(display, state->window, &root);
             XWindowChanges changes = {
                 .x = 0, .y = 0, .width = root.width, .height = root.height};
-            XConfigureWindow(display, stream_states[i].window,
+            XConfigureWindow(display, state->streams[i].window,
                              CWX | CWY | CWWidth | CWHeight, &changes);
-            XMapWindow(display, stream_states[i].window);
+            XMapWindow(display, state->streams[i].window);
 
           } else {
-            XUnmapWindow(display, stream_states[i].window);
+            XUnmapWindow(display, state->streams[i].window);
           }
         }
       } else {
         struct LayoutGrid layout =
-            layout_grid_new(state.width, state.height, stream_count);
-        for (int i = 0; i < stream_count; i++) {
+            layout_grid_new(state->width, state->height, state->stream_count);
+        for (int i = 0; i < state->stream_count; i++) {
           struct LayoutPane pane = layout_grid_pane(layout, i);
           XWindowChanges changes = {.x = pane.x,
                                     .y = pane.y,
                                     .width = pane.width,
                                     .height = pane.height};
-          XConfigureWindow(display, stream_states[i].window,
+          XConfigureWindow(display, state->streams[i].window,
                            CWX | CWY | CWWidth | CWHeight, &changes);
-          XMapWindow(display, stream_states[i].window);
+          XMapWindow(display, state->streams[i].window);
         }
       }
     }
@@ -393,17 +397,7 @@ int main(int argc, char *argv[]) {
     clock_wait();
   }
 
-  // Concurrently shutdown all mpv handles
-  pthread_t *threads = malloc(stream_count * sizeof(pthread_t));
-  for (int i = 0; i < stream_count; i++) {
-    pthread_create(&threads[i], NULL, shutdown_mpv, stream_states[i].mpv);
-  }
-  for (int i = 0; i < stream_count; i++) {
-    pthread_join(threads[i], NULL);
-  }
-  free(threads);
-
-  XCloseDisplay(display);
+  destory();
 
   return 0;
 }

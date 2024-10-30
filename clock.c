@@ -8,8 +8,8 @@ static int64_t time_now() {
   return tp.tv_sec * 1000 + tp.tv_usec / 1000;
 }
 
-int64_t interval_ms = 16; // 60fps
-int64_t start_ms;
+static int64_t interval_ms = 16; // 60fps
+static int64_t start_ms;
 
 void clock_set_fps(int fps) { interval_ms = (1.0 / fps) * 1000; }
 

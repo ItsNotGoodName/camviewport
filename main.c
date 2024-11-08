@@ -1,7 +1,8 @@
 #include "./inih/ini.h"
 #include "clock.h"
+#include "config.h"
 #include "layout.h"
-#include <X11/X.h>
+#include "util.h"
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
 #include <argp.h>
@@ -10,13 +11,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #ifndef VERSION
 #define VERSION "dev"
 #endif
 
 #define MAX_STREAMS 32
+#define MAX_FLAGS 32
 
 typedef struct {
   Window window;
@@ -38,20 +39,6 @@ typedef struct {
   StreamState streams[MAX_STREAMS];
 } State;
 
-typedef struct {
-  char *name;
-  char *main;
-  char *sub;
-} ConfigStream;
-
-typedef struct {
-  char *config_file;
-  char *hwdec;
-  char *ao;
-  int stream_count;
-  ConfigStream streams[MAX_STREAMS];
-} Config;
-
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
 const char *MPV_PROPERTY_TIME_REMAINING = "time-remaining";
 const double MPV_MAX_DELAY_S = 0.5;
@@ -61,11 +48,6 @@ const int MPV_TIMEOUT_S = 5;
 static Display *display;
 static Atom wm_delete_window;
 static State *state;
-
-static void die(const char *msg) {
-  fprintf(stderr, "%s\n", msg);
-  exit(1);
-}
 
 static int time_now() { return (int)time(NULL); }
 
@@ -130,7 +112,8 @@ void destory() {
   XCloseDisplay(display);
 }
 
-mpv_handle *create_mpv(Window window, char *hwdec, char *audio) {
+mpv_handle *create_mpv(Window window, ConfigMpvFlags gflags,
+                       ConfigMpvFlags flags) {
   mpv_handle *mpv = mpv_create();
   if (mpv == NULL)
     die("mpv context failed");
@@ -144,12 +127,13 @@ mpv_handle *create_mpv(Window window, char *hwdec, char *audio) {
                         "no"); // FIXME: this causes the cursor disappears on a
                                // sub window when alt-tab is pressed, this only
                                // happens to sub window the cursor is hovering
-  if (audio)
-    mpv_set_option_string(mpv, "ao",
-                          audio); // FIXME: audio other than null causes crashes
-                                  // when started with startx
-  if (hwdec)
-    mpv_set_option_string(mpv, "hwdec", hwdec);
+  mpv_set_option_string(mpv, "ao",
+                        "null"); // FIXME: audio other than null causes crashes
+                                 // when started with startx
+  for (int i = 0; i < gflags.count; i++)
+    mpv_set_option_string(mpv, gflags.flags[i].name, gflags.flags[i].data);
+  for (int i = 0; i < flags.count; i++)
+    mpv_set_option_string(mpv, flags.flags[i].name, flags.flags[i].data);
 
   mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING, MPV_FORMAT_DOUBLE);
   mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
@@ -206,7 +190,7 @@ void setup_streams(Config config) {
     XMapWindow(display, window);
     XSync(display, 0);
 
-    mpv_handle *mpv = create_mpv(window, config.hwdec, config.ao);
+    mpv_handle *mpv = create_mpv(window, config.flags, config.streams[i].flags);
 
     state->streams[i].window = window;
     state->streams[i].mpv = mpv;
@@ -220,9 +204,7 @@ void setup_streams(Config config) {
 
 static struct argp_option cli_options[] = {
     {"version", 'v', 0, 0, "Show version"},
-    {"hwdec", 1, "HWDEC", 0, "Set hwdec mpv option"},
-    {"config", 2, "FILENAME", 0, "Path to config file"},
-    {"ao", 3, "AO", 0, "Set ao mpv option"},
+    {"config", 'c', "FILENAME", 0, "Path to config file"},
     {0}};
 
 static int config_cli_parser(int key, char *arg, struct argp_state *state) {
@@ -232,66 +214,11 @@ static int config_cli_parser(int key, char *arg, struct argp_state *state) {
   case 'v':
     printf("%s\n", VERSION);
     exit(0);
-  case 1:
-    config->hwdec = arg;
-    break;
-  case 2:
+  case 'c':
     config->config_file = arg;
     break;
-  case 3:
-    config->ao = arg;
-    break;
-  default:
-    return 1;
   }
   return 0;
-}
-
-static int config_file_parser(void *user, const char *section, const char *name,
-                              const char *value) {
-  Config *config = user;
-
-#define MATCH(n) strcmp(name, n) == 0
-  if (strcmp(section, "") == 0) {
-    // Global
-    if (MATCH("hwdec"))
-      config->hwdec = strdup(value);
-    if (MATCH("ao"))
-      config->ao = strdup(value);
-    else
-      return 0;
-  } else {
-    // Stream
-
-    // Get index
-    int index = -1;
-    for (int i = 0; i < config->stream_count; i++) {
-      if (strcmp(config->streams[i].name, section) == 0) {
-        // Found
-        config->streams->name = strdup(section);
-        index = i;
-        break;
-      }
-    }
-    if (index == -1) {
-      // Create
-      if (config->stream_count == MAX_STREAMS)
-        die("too many streams");
-      index = config->stream_count;
-
-      config->streams[index].name = strdup(section);
-      config->stream_count++;
-    }
-
-    if (MATCH("main")) {
-      config->streams[index].main = strdup(value);
-    } else if (MATCH("sub")) {
-      config->streams[index].sub = strdup(value);
-    } else
-      return 0;
-  }
-
-  return 1;
 }
 
 void parse_config(int argc, char *argv[], Config *config) {
@@ -308,7 +235,9 @@ void parse_config(int argc, char *argv[], Config *config) {
 }
 
 int main(int argc, char *argv[]) {
-  Config config = {.config_file = "camviewport.ini", .ao = "null"};
+  Config config = {
+      .config_file = "camviewport.ini",
+  };
 
   parse_config(argc, argv, &config);
 
@@ -316,9 +245,8 @@ int main(int argc, char *argv[]) {
 
   setup_streams(config);
 
-  for (int i = 0; i < state->stream_count; i++) {
+  for (int i = 0; i < state->stream_count; i++)
     sync_stream(i);
-  }
 
   clock_set_fps(60);
 

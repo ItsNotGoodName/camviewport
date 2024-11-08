@@ -40,6 +40,7 @@ typedef struct {
 typedef struct {
   char *config_file;
   char *hwdec;
+  char *audio;
   int file_count;
   char *files[MAX_STREAMS];
 } Config;
@@ -122,18 +123,24 @@ void destory() {
   XCloseDisplay(display);
 }
 
-mpv_handle *create_mpv(Window window, char *hwdec) {
+mpv_handle *create_mpv(Window window, char *hwdec, char *audio) {
   mpv_handle *mpv = mpv_create();
   if (mpv == NULL)
     die("mpv context failed");
 
   mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &window);
+  // mpv_set_option_string(mpv, "idle", "yes");
+  // mpv_set_option_string(mpv, "force-window", "yes");
   mpv_set_option_string(mpv, "profile", "low-latency");
   mpv_set_option_string(mpv, "cache", "now");
   mpv_set_option_string(mpv, "input-cursor",
                         "no"); // FIXME: this causes the cursor disappears on a
                                // sub window when alt-tab is pressed, this only
                                // happens to sub window the cursor is hovering
+  if (audio)
+    mpv_set_option_string(mpv, "ao",
+                          audio); // FIXME: audio other than null causes crashes
+                                  // when started with startx
   if (hwdec)
     mpv_set_option_string(mpv, "hwdec", hwdec);
 
@@ -161,7 +168,7 @@ void setup_streams(Config config) {
     XMapWindow(display, window);
     XSync(display, 0);
 
-    mpv_handle *mpv = create_mpv(window, config.hwdec);
+    mpv_handle *mpv = create_mpv(window, config.hwdec, config.audio);
 
     const char *cmd[] = {"loadfile", config.files[i], NULL};
     if (mpv_command(mpv, cmd) < 0)
@@ -251,7 +258,7 @@ void parse_config(int argc, char *argv[], Config *config) {
 }
 
 int main(int argc, char *argv[]) {
-  Config config = {.config_file = "camviewport.ini"};
+  Config config = {.config_file = "camviewport.ini", .audio = "null"};
 
   parse_config(argc, argv, &config);
 

@@ -1,4 +1,4 @@
-CFLAGS := -std=gnu99 -Wall -lmpv -lX11 -lm
+CFLAGS := -std=gnu99 -Wall -lmpv -lX11 -lm ./inih/ini.c
 
 debug:
 	gcc *.c -o camviewport-debug $(CFLAGS) -O0

@@ -1,3 +1,4 @@
+#include "./inih/ini.h"
 #include "clock.h"
 #include "layout.h"
 #include <X11/X.h>
@@ -37,6 +38,7 @@ typedef struct {
 } State;
 
 typedef struct {
+  char *config_file;
   char *hwdec;
   int file_count;
   char *files[MAX_STREAMS];
@@ -179,9 +181,10 @@ void setup_streams(Config config) {
 static struct argp_option cli_options[] = {
     {"version", 'v', 0, 0, "Show version"},
     {"hwdec", 1, "HWDEC", 0, "Set hwdec mpv option"},
+    {"config", 2, "FILENAME", 0, "Path to config file"},
     {0}};
 
-static int cli_parser(int key, char *arg, struct argp_state *state) {
+static int config_cli_parser(int key, char *arg, struct argp_state *state) {
   Config *config = state->input;
 
   switch (key) {
@@ -191,6 +194,8 @@ static int cli_parser(int key, char *arg, struct argp_state *state) {
   case 1:
     config->hwdec = arg;
     break;
+  case 2:
+    config->config_file = arg;
   case ARGP_KEY_ARG:
     for (int i = 0; i < MAX_STREAMS; i++) {
       if (config->files[i] == NULL) {
@@ -204,16 +209,49 @@ static int cli_parser(int key, char *arg, struct argp_state *state) {
   return 0;
 }
 
+static int config_file_parser(void *user, const char *section, const char *name,
+                              const char *value) {
+  Config *config = user;
+
+#define MATCH(n) strcmp(name, n) == 0
+  if (strcmp(section, "") == 0) {
+    // Global
+    if (MATCH("hwdec"))
+      config->hwdec = strdup(value);
+    else
+      return 0;
+  } else {
+    // Stream
+    if (MATCH("main")) {
+      for (int i = 0; i < MAX_STREAMS; i++) {
+        if (config->files[i] == NULL) {
+          config->files[i] = strdup(value);
+          config->file_count++;
+          break;
+        }
+      }
+    }
+    return 0;
+  }
+
+  return 1;
+}
+
 void parse_config(int argc, char *argv[], Config *config) {
-  struct argp argp = {cli_options, cli_parser, 0, 0};
+  struct argp argp = {cli_options, config_cli_parser, 0, 0};
   argp_parse(&argp, argc, argv, 0, 0, config);
 
+  if (ini_parse(config->config_file, config_file_parser, config) < 0) {
+    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
+    exit(1);
+  }
+
   if (config->files[0] == NULL)
-    die("no media files specified");
+    die("No streams specified");
 }
 
 int main(int argc, char *argv[]) {
-  Config config = {};
+  Config config = {.config_file = "camviewport.ini"};
 
   parse_config(argc, argv, &config);
 

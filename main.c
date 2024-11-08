@@ -21,7 +21,8 @@
 typedef struct {
   Window window;
   mpv_handle *mpv;
-  char *file;
+  char *main;
+  char *sub;
   double speed;
   int speed_updated_at;
   int pinged_at;
@@ -38,11 +39,17 @@ typedef struct {
 } State;
 
 typedef struct {
+  char *name;
+  char *main;
+  char *sub;
+} ConfigStream;
+
+typedef struct {
   char *config_file;
   char *hwdec;
-  char *audio;
-  int file_count;
-  char *files[MAX_STREAMS];
+  char *ao;
+  int stream_count;
+  ConfigStream streams[MAX_STREAMS];
 } Config;
 
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
@@ -156,11 +163,42 @@ mpv_handle *create_mpv(Window window, char *hwdec, char *audio) {
   return mpv;
 }
 
-void setup_streams(Config config) {
-  struct LayoutGrid layout =
-      layout_grid_new(state->width, state->height, config.file_count);
+void loadfile(mpv_handle *mpv, char *stream) {
+  const char *cmd[] = {"loadfile", stream, NULL};
+  int err = mpv_command(mpv, cmd) < 0;
+  if (err < 0)
+    fprintf(stderr, "failed to play mpv file: error %d", err);
+}
 
-  for (int i = 0; i < config.file_count; i++) {
+void stop(mpv_handle *mpv) {
+  const char *cmd[] = {"stop", NULL};
+  int err = mpv_command(mpv, cmd) < 0;
+  if (err < 0)
+    fprintf(stderr, "failed to stop mpv file: error %d", err);
+}
+
+void sync_stream(int index) {
+  if (state->fullscreen) {
+    if (state->fullscreen_window == state->streams[index].window) {
+      loadfile(state->streams[index].mpv, state->streams[index].main);
+    } else {
+      stop(state->streams[index].mpv);
+    }
+  } else {
+    char *stream = state->streams[index].sub;
+    if (state->stream_count == 1)
+      stream = state->streams[index].main;
+
+    loadfile(state->streams[index].mpv, stream);
+  }
+}
+
+void setup_streams(Config config) {
+  state->stream_count = config.stream_count;
+
+  struct LayoutGrid layout =
+      layout_grid_new(state->width, state->height, state->stream_count);
+  for (int i = 0; i < state->stream_count; i++) {
     struct LayoutPane pane = layout_grid_pane(layout, i);
     Window window = XCreateSimpleWindow(display, state->window, pane.x, pane.y,
                                         pane.width, pane.height, 0, 0, 0);
@@ -168,27 +206,23 @@ void setup_streams(Config config) {
     XMapWindow(display, window);
     XSync(display, 0);
 
-    mpv_handle *mpv = create_mpv(window, config.hwdec, config.audio);
-
-    const char *cmd[] = {"loadfile", config.files[i], NULL};
-    if (mpv_command(mpv, cmd) < 0)
-      die("mpv failed to play file");
+    mpv_handle *mpv = create_mpv(window, config.hwdec, config.ao);
 
     state->streams[i].window = window;
     state->streams[i].mpv = mpv;
-    state->streams[i].file = config.files[i];
+    state->streams[i].main = config.streams[i].main;
+    state->streams[i].sub = config.streams[i].sub;
     state->streams[i].speed = 1.0;
     state->streams[i].speed_updated_at = time_now();
     state->streams[i].pinged_at = time_now();
   }
-
-  state->stream_count = config.file_count;
 }
 
 static struct argp_option cli_options[] = {
     {"version", 'v', 0, 0, "Show version"},
     {"hwdec", 1, "HWDEC", 0, "Set hwdec mpv option"},
     {"config", 2, "FILENAME", 0, "Path to config file"},
+    {"ao", 3, "AO", 0, "Set ao mpv option"},
     {0}};
 
 static int config_cli_parser(int key, char *arg, struct argp_state *state) {
@@ -203,15 +237,12 @@ static int config_cli_parser(int key, char *arg, struct argp_state *state) {
     break;
   case 2:
     config->config_file = arg;
-  case ARGP_KEY_ARG:
-    for (int i = 0; i < MAX_STREAMS; i++) {
-      if (config->files[i] == NULL) {
-        config->files[i] = arg;
-        config->file_count++;
-        break;
-      }
-    }
     break;
+  case 3:
+    config->ao = arg;
+    break;
+  default:
+    return 1;
   }
   return 0;
 }
@@ -225,20 +256,39 @@ static int config_file_parser(void *user, const char *section, const char *name,
     // Global
     if (MATCH("hwdec"))
       config->hwdec = strdup(value);
+    if (MATCH("ao"))
+      config->ao = strdup(value);
     else
       return 0;
   } else {
     // Stream
-    if (MATCH("main")) {
-      for (int i = 0; i < MAX_STREAMS; i++) {
-        if (config->files[i] == NULL) {
-          config->files[i] = strdup(value);
-          config->file_count++;
-          break;
-        }
+
+    // Get index
+    int index = -1;
+    for (int i = 0; i < config->stream_count; i++) {
+      if (strcmp(config->streams[i].name, section) == 0) {
+        // Found
+        config->streams->name = strdup(section);
+        index = i;
+        break;
       }
     }
-    return 0;
+    if (index == -1) {
+      // Create
+      if (config->stream_count == MAX_STREAMS)
+        die("too many streams");
+      index = config->stream_count;
+
+      config->streams[index].name = strdup(section);
+      config->stream_count++;
+    }
+
+    if (MATCH("main")) {
+      config->streams[index].main = strdup(value);
+    } else if (MATCH("sub")) {
+      config->streams[index].sub = strdup(value);
+    } else
+      return 0;
   }
 
   return 1;
@@ -253,12 +303,12 @@ void parse_config(int argc, char *argv[], Config *config) {
     exit(1);
   }
 
-  if (config->files[0] == NULL)
+  if (config->stream_count == 0)
     die("No streams specified");
 }
 
 int main(int argc, char *argv[]) {
-  Config config = {.config_file = "camviewport.ini", .audio = "null"};
+  Config config = {.config_file = "camviewport.ini", .ao = "null"};
 
   parse_config(argc, argv, &config);
 
@@ -266,14 +316,18 @@ int main(int argc, char *argv[]) {
 
   setup_streams(config);
 
+  for (int i = 0; i < state->stream_count; i++) {
+    sync_stream(i);
+  }
+
   clock_set_fps(60);
 
   int quit = False;
   while (!quit) {
     clock_start();
 
-    Bool redraw = False;
-    Bool sync = False;
+    Bool x11_sync = False;
+    Bool mpv_sync = False;
 
     // X11 events
     while (XPending(display)) {
@@ -295,7 +349,7 @@ int main(int argc, char *argv[]) {
         if (event.xconfigure.window == state->window) {
           state->width = event.xconfigure.width;
           state->height = event.xconfigure.height;
-          redraw = True;
+          x11_sync = True;
         }
         break;
       case ButtonPress:
@@ -306,8 +360,8 @@ int main(int argc, char *argv[]) {
           state->fullscreen = True;
           state->fullscreen_window = event.xbutton.window;
         }
-        redraw = True;
-        sync = True;
+        x11_sync = True;
+        mpv_sync = True;
         break;
       default:
         fprintf(stderr, "unhandled X11 event: %d\n", event.type);
@@ -315,22 +369,24 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    for (int i = 0; i < config.file_count; i++) {
+    for (int stream_index = 0; stream_index < config.stream_count;
+         stream_index++) {
       double new_speed = 0;
       Bool ping = False;
       Bool reload_file = False;
 
       // Reset speed if stuck
-      if (time_now() > state->streams[i].speed_updated_at + 5)
+      if (time_now() > state->streams[stream_index].speed_updated_at + 5)
         new_speed = 1.0;
 
       // Reload locked up stream
-      if (time_now() > (state->streams[i].pinged_at + MPV_TIMEOUT_S))
+      if (time_now() > (state->streams[stream_index].pinged_at + MPV_TIMEOUT_S))
         reload_file = True;
 
       // MPV events
       while (True) {
-        mpv_event *mp_event = mpv_wait_event(state->streams[i].mpv, 0);
+        mpv_event *mp_event =
+            mpv_wait_event(state->streams[stream_index].mpv, 0);
         if (mp_event->event_id == MPV_EVENT_NONE)
           break;
         if (mp_event->event_id == MPV_EVENT_SHUTDOWN) {
@@ -370,44 +426,25 @@ int main(int argc, char *argv[]) {
                 mpv_event_name(mp_event->event_id));
       }
 
-      // MPV side effects
-      if (new_speed && new_speed != state->streams[i].speed) {
-        int err = mpv_set_property(state->streams[i].mpv, "speed",
+      // mpv side effects
+      if (new_speed && new_speed != state->streams[stream_index].speed) {
+        int err = mpv_set_property(state->streams[stream_index].mpv, "speed",
                                    MPV_FORMAT_DOUBLE, &new_speed);
         if (err < 0)
           fprintf(stderr, "failed to mpv set speed: error %d", err);
         else {
-          state->streams[i].speed = new_speed;
-          state->streams[i].speed_updated_at = time_now();
+          state->streams[stream_index].speed = new_speed;
+          state->streams[stream_index].speed_updated_at = time_now();
         }
       }
-      if (reload_file && (!state->fullscreen || state->streams[i].window ==
-                                                    state->fullscreen_window)) {
-        const char *cmd[] = {"loadfile", state->streams[i].file, NULL};
-        int err = mpv_command(state->streams[i].mpv, cmd) < 0;
-        if (err < 0)
-          fprintf(stderr, "failed to reload mpv file: error %d", err);
-      }
+      if (reload_file || mpv_sync)
+        sync_stream(stream_index);
       if (reload_file || ping)
-        state->streams[i].pinged_at = time_now();
-      if (sync) {
-        if (!state->fullscreen ||
-            state->streams[i].window == state->fullscreen_window) {
-          const char *cmd[] = {"loadfile", state->streams[i].file, NULL};
-          int err = mpv_command(state->streams[i].mpv, cmd) < 0;
-          if (err < 0)
-            fprintf(stderr, "failed to play mpv file: error %d", err);
-        } else {
-          const char *cmd[] = {"stop", NULL};
-          int err = mpv_command(state->streams[i].mpv, cmd) < 0;
-          if (err < 0)
-            fprintf(stderr, "failed to stop mpv file: error %d", err);
-        }
-      }
+        state->streams[stream_index].pinged_at = time_now();
     }
 
     // X11 side effects
-    if (redraw) {
+    if (x11_sync) {
       if (state->fullscreen) {
         for (int i = 0; i < state->stream_count; i++) {
           if (state->streams[i].window == state->fullscreen_window) {

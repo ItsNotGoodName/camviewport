@@ -1,5 +1,8 @@
 #include "layout.h"
+#include "util.h"
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 LayoutGrid layout_grid_new(int width, int height, int count) {
   int columns = 0;
@@ -45,4 +48,57 @@ LayoutWindow layout_pane_window(LayoutPane pane, int width, int height) {
       .height = (int)(pane.height * height),
   };
   return w;
+}
+
+static double ratio(const char *ratio) {
+  // if num , err : = strconv.ParseFloat(ratio, 32);
+  // err == nil{return float32(num), err}
+  //
+  //     f : = strings.Split(ratio, "/") fLen : = len(f) if fLen == 2 {
+  //   num,
+  //       err : = strconv.ParseFloat(f[0], 32) if err != nil{return 0, err}
+  //
+  //               den,
+  //           err : = strconv.ParseFloat(f[1], 32) if err != nil {
+  //     return 0, err
+  //   }
+  //
+  //   return float32(num) / float32(den), nil
+  // }
+  //
+  // return 0, fmt.Errorf("%s: invalid float", ratio)
+}
+
+int layout_file_parser(void *user, const char *section, const char *name,
+                       const char *value) {
+  LayoutFile *file = user;
+
+#define MATCH(n) strcmp(name, n) == 0
+
+  if (strcmp(section, "") == 0) {
+    // Global
+    if (MATCH("name")) {
+      file->name = strdup(value);
+    } else {
+      return 0;
+    }
+  } else {
+    int index = atoi(section);
+    if (index > MAX_STREAMS)
+      die("too many panes");
+
+    if (MATCH("x")) {
+      file->panes[index].x = atof(value);
+    } else if (MATCH("y")) {
+      file->panes[index].y = atof(value);
+    } else if (MATCH("w")) {
+      file->panes[index].width = atof(value);
+    } else if (MATCH("h")) {
+      file->panes[index].height = atof(value);
+    } else {
+      return 0;
+    }
+  }
+
+  return 1;
 }

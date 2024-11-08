@@ -1,7 +1,6 @@
 #pragma once
 
-#define MAX_STREAMS 32
-#define MAX_MPV_FLAGS 64
+#include "main.h"
 
 typedef struct {
   char *name;
@@ -22,6 +21,7 @@ typedef struct {
 
 typedef struct {
   char *config_file;
+  char *layout_file;
   ConfigMpvFlags flags;
   int stream_count;
   ConfigStream streams[MAX_STREAMS];

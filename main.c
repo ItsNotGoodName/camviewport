@@ -12,16 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef VERSION
-#define VERSION "dev"
-#endif
-
-#define MAX_STREAMS 32
-#define MAX_FLAGS 32
+enum {
+  VIEW_GRID,
+  VIEW_FULLSCREEN,
+  VIEW_PANES,
+} View;
 
 typedef struct {
   Window window;
-  LayoutPane pane;
   mpv_handle *mpv;
   char *main;
   char *sub;
@@ -34,17 +32,18 @@ typedef struct {
   Window window;
   int width;
   int height;
-  Bool fullscreen;
+  int view;
   Window fullscreen_window;
   int stream_count;
   StreamState streams[MAX_STREAMS];
+  LayoutFile file;
 } State;
 
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
 const char *MPV_PROPERTY_TIME_REMAINING = "time-remaining";
-const double MPV_MAX_DELAY_S = 0.5;
-const double MPV_MIN_DISPLAY_S = 0.1;
-const int MPV_TIMEOUT_S = 5;
+const double MPV_MAX_DELAY_SEC = 0.5;
+const double MPV_MIN_DISPLAY_SEC = 0.1;
+const int MPV_TIMEOUT_SEC = 5;
 
 static Display *display;
 static Atom wm_delete_window;
@@ -163,19 +162,39 @@ void stop(mpv_handle *mpv) {
 }
 
 void sync_stream(int index) {
-  if (state->fullscreen) {
+  switch (state->view) {
+  case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
       loadfile(state->streams[index].mpv, state->streams[index].main);
     } else {
       stop(state->streams[index].mpv);
     }
-  } else {
+    break;
+  }
+  case VIEW_GRID: {
     char *stream = state->streams[index].sub;
     if (state->stream_count == 1)
       stream = state->streams[index].main;
 
     loadfile(state->streams[index].mpv, stream);
+    break;
   }
+  case VIEW_PANES: {
+    loadfile(state->streams[index].mpv, state->streams[index].sub);
+    break;
+  }
+  }
+}
+
+void setup_layout(char *layout_file) {
+  if (layout_file == NULL)
+    return;
+
+  if (ini_parse(layout_file, layout_file_parser, &state->file) < 0) {
+    fprintf(stderr, "Failed to load layout '%s'\n", layout_file);
+    exit(1);
+  }
+  printf("%s\n", state->file.name);
 }
 
 void setup_streams(Config config) {
@@ -206,6 +225,7 @@ void setup_streams(Config config) {
 static struct argp_option cli_options[] = {
     {"version", 'v', 0, 0, "Show version"},
     {"config", 'c', "FILENAME", 0, "Path to config file"},
+    {"layout", 'l', "LAYOUT", 0, "Path to layout file"},
     {0}};
 
 static int config_cli_parser(int key, char *arg, struct argp_state *state) {
@@ -217,6 +237,9 @@ static int config_cli_parser(int key, char *arg, struct argp_state *state) {
     exit(0);
   case 'c':
     config->config_file = arg;
+    break;
+  case 'l':
+    config->layout_file = arg;
     break;
   }
   return 0;
@@ -243,6 +266,8 @@ int main(int argc, char *argv[]) {
   parse_config(argc, argv, &config);
 
   setup();
+
+  setup_layout(config.layout_file);
 
   setup_streams(config);
 
@@ -283,10 +308,10 @@ int main(int argc, char *argv[]) {
         break;
       case ButtonPress:
         fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
-        if (state->fullscreen) {
-          state->fullscreen = False;
+        if (state->view == VIEW_FULLSCREEN) {
+          state->view = VIEW_GRID;
         } else {
-          state->fullscreen = True;
+          state->view = VIEW_FULLSCREEN;
           state->fullscreen_window = event.xbutton.window;
         }
         x11_sync = True;
@@ -309,7 +334,8 @@ int main(int argc, char *argv[]) {
         new_speed = 1.0;
 
       // Reload locked up stream
-      if (time_now() > (state->streams[stream_index].pinged_at + MPV_TIMEOUT_S))
+      if (time_now() >
+          (state->streams[stream_index].pinged_at + MPV_TIMEOUT_SEC))
         reload_file = True;
 
       // MPV events
@@ -342,9 +368,9 @@ int main(int argc, char *argv[]) {
               // fprintf(stderr,"property: %s: %f\n",
               // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
-              if (*data > MPV_MAX_DELAY_S) {
+              if (*data > MPV_MAX_DELAY_SEC) {
                 new_speed = 1.5;
-              } else if (*data < MPV_MIN_DISPLAY_S) {
+              } else if (*data < MPV_MIN_DISPLAY_SEC) {
                 new_speed = 1.0;
               }
             }
@@ -374,7 +400,8 @@ int main(int argc, char *argv[]) {
 
     // X11 side effects
     if (x11_sync) {
-      if (state->fullscreen) {
+      switch (state->view) {
+      case VIEW_FULLSCREEN: {
         for (int i = 0; i < state->stream_count; i++) {
           if (state->streams[i].window == state->fullscreen_window) {
             XWindowAttributes root;
@@ -389,7 +416,9 @@ int main(int argc, char *argv[]) {
             XUnmapWindow(display, state->streams[i].window);
           }
         }
-      } else {
+        break;
+      }
+      case VIEW_GRID: {
         LayoutGrid layout =
             layout_grid_new(state->width, state->height, state->stream_count);
         for (int i = 0; i < state->stream_count; i++) {
@@ -402,6 +431,11 @@ int main(int argc, char *argv[]) {
                            CWX | CWY | CWWidth | CWHeight, &changes);
           XMapWindow(display, state->streams[i].window);
         }
+        break;
+      }
+      case VIEW_PANES: {
+        break;
+      }
       }
     }
 

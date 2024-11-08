@@ -1,20 +1,29 @@
 #pragma once
 
-struct LayoutPane {
+typedef struct {
   int x;
   int y;
   int width;
   int height;
-};
+} LayoutWindow;
 
-struct LayoutGrid {
+typedef struct {
+  double x;
+  double y;
+  double width;
+  double height;
+} LayoutPane;
+
+typedef struct {
   int width;
   int height;
   int pane_width;
   int pane_height;
   int columns;
-};
+} LayoutGrid;
 
-struct LayoutGrid layout_grid_new(int width, int height, int count);
+LayoutGrid layout_grid_new(int width, int height, int count);
 
-struct LayoutPane layout_grid_pane(struct LayoutGrid layout_grid, int index);
+LayoutWindow layout_grid_window(LayoutGrid layout_grid, int index);
+
+LayoutWindow layout_pane_window(LayoutPane pane, int width, int height);

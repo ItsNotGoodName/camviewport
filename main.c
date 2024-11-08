@@ -21,6 +21,7 @@
 
 typedef struct {
   Window window;
+  LayoutPane pane;
   mpv_handle *mpv;
   char *main;
   char *sub;
@@ -180,10 +181,10 @@ void sync_stream(int index) {
 void setup_streams(Config config) {
   state->stream_count = config.stream_count;
 
-  struct LayoutGrid layout =
+  LayoutGrid layout =
       layout_grid_new(state->width, state->height, state->stream_count);
   for (int i = 0; i < state->stream_count; i++) {
-    struct LayoutPane pane = layout_grid_pane(layout, i);
+    LayoutWindow pane = layout_grid_window(layout, i);
     Window window = XCreateSimpleWindow(display, state->window, pane.x, pane.y,
                                         pane.width, pane.height, 0, 0, 0);
     XSelectInput(display, window, ButtonPressMask);
@@ -389,10 +390,10 @@ int main(int argc, char *argv[]) {
           }
         }
       } else {
-        struct LayoutGrid layout =
+        LayoutGrid layout =
             layout_grid_new(state->width, state->height, state->stream_count);
         for (int i = 0; i < state->stream_count; i++) {
-          struct LayoutPane pane = layout_grid_pane(layout, i);
+          LayoutWindow pane = layout_grid_window(layout, i);
           XWindowChanges changes = {.x = pane.x,
                                     .y = pane.y,
                                     .width = pane.width,

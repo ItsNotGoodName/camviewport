@@ -26,7 +26,7 @@ typedef struct {
 
 typedef struct {
   char *name;
-  int count;
+  int pane_count;
   LayoutPane panes[MAX_STREAMS];
 } LayoutFile;
 

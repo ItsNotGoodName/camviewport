@@ -50,23 +50,19 @@ LayoutWindow layout_pane_window(LayoutPane pane, int width, int height) {
   return w;
 }
 
-static double ratio(const char *ratio) {
-  // if num , err : = strconv.ParseFloat(ratio, 32);
-  // err == nil{return float32(num), err}
-  //
-  //     f : = strings.Split(ratio, "/") fLen : = len(f) if fLen == 2 {
-  //   num,
-  //       err : = strconv.ParseFloat(f[0], 32) if err != nil{return 0, err}
-  //
-  //               den,
-  //           err : = strconv.ParseFloat(f[1], 32) if err != nil {
-  //     return 0, err
-  //   }
-  //
-  //   return float32(num) / float32(den), nil
-  // }
-  //
-  // return 0, fmt.Errorf("%s: invalid float", ratio)
+static double ratio(const char *maybe_ratio) {
+  char *slash = strchr(maybe_ratio, '/');
+  if (!slash)
+    return atof(maybe_ratio);
+
+  char prev = *slash;
+  *slash = 0;
+  double top = atof(maybe_ratio);
+  *slash = prev;
+
+  double bot = atof(slash + sizeof(char));
+
+  return top / bot;
 }
 
 int layout_file_parser(void *user, const char *section, const char *name,
@@ -88,16 +84,19 @@ int layout_file_parser(void *user, const char *section, const char *name,
       die("too many panes");
 
     if (MATCH("x")) {
-      file->panes[index].x = atof(value);
+      file->panes[index].x = ratio(value);
     } else if (MATCH("y")) {
-      file->panes[index].y = atof(value);
+      file->panes[index].y = ratio(value);
     } else if (MATCH("w")) {
-      file->panes[index].width = atof(value);
+      file->panes[index].width = ratio(value);
     } else if (MATCH("h")) {
-      file->panes[index].height = atof(value);
+      file->panes[index].height = ratio(value);
     } else {
       return 0;
     }
+
+    if (file->pane_count < index)
+      file->pane_count = index;
   }
 
   return 1;

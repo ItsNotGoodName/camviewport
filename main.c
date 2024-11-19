@@ -15,7 +15,7 @@
 enum {
   VIEW_GRID,
   VIEW_FULLSCREEN,
-  VIEW_PANES,
+  VIEW_LAYOUT,
 } View;
 
 typedef struct {
@@ -33,10 +33,11 @@ typedef struct {
   int width;
   int height;
   int view;
+  int mode;
   Window fullscreen_window;
+  LayoutFile file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
-  LayoutFile file;
 } State;
 
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
@@ -179,35 +180,89 @@ void sync_stream(int index) {
     loadfile(state->streams[index].mpv, stream);
     break;
   }
-  case VIEW_PANES: {
+  case VIEW_LAYOUT: {
     loadfile(state->streams[index].mpv, state->streams[index].sub);
     break;
   }
   }
 }
 
-void setup_layout(char *layout_file) {
-  if (layout_file == NULL)
-    return;
+void render() {
+  switch (state->view) {
+  case VIEW_FULLSCREEN: {
+    for (int i = 0; i < state->stream_count; i++) {
+      if (state->streams[i].window == state->fullscreen_window) {
+        XWindowAttributes root;
+        XGetWindowAttributes(display, state->window, &root);
+        XWindowChanges changes = {
+            .x = 0, .y = 0, .width = root.width, .height = root.height};
+        XConfigureWindow(display, state->streams[i].window,
+                         CWX | CWY | CWWidth | CWHeight, &changes);
+        XMapWindow(display, state->streams[i].window);
 
+      } else {
+        XUnmapWindow(display, state->streams[i].window);
+      }
+    }
+    break;
+  }
+  case VIEW_GRID: {
+    LayoutGrid layout =
+        layout_grid_new(state->width, state->height, state->stream_count);
+    for (int i = 0; i < state->stream_count; i++) {
+      LayoutWindow pane = layout_grid_window(layout, i);
+      XWindowChanges changes = {
+          .x = pane.x,
+          .y = pane.y,
+          .width = pane.width,
+          .height = pane.height,
+      };
+      XConfigureWindow(display, state->streams[i].window,
+                       CWX | CWY | CWWidth | CWHeight, &changes);
+      XMapWindow(display, state->streams[i].window);
+    }
+    break;
+  }
+  case VIEW_LAYOUT: {
+    int visible = MIN(state->stream_count, state->file.pane_count);
+    for (int i = 0; i < visible; i++) {
+      XWindowChanges changes = {
+          .x = state->file.panes[i].x * state->width,
+          .y = state->file.panes[i].y * state->height,
+          .width = state->file.panes[i].width * state->width,
+          .height = state->file.panes[i].height * state->height,
+      };
+      XConfigureWindow(display, state->streams[i].window,
+                       CWX | CWY | CWWidth | CWHeight, &changes);
+      XMapWindow(display, state->streams[i].window);
+    }
+
+    for (int i = visible; i < state->stream_count; i++)
+      XUnmapWindow(display, state->streams[i].window);
+
+    break;
+  }
+  }
+}
+
+void load_layout(char *layout_file) {
+  state->mode = VIEW_LAYOUT;
+  state->view = VIEW_LAYOUT;
   if (ini_parse(layout_file, layout_file_parser, &state->file) < 0) {
     fprintf(stderr, "Failed to load layout '%s'\n", layout_file);
     exit(1);
   }
-  printf("%s\n", state->file.name);
+
+  fprintf(stderr, "loading layout file: %s\n", state->file.name);
 }
 
 void setup_streams(Config config) {
   state->stream_count = config.stream_count;
 
-  LayoutGrid layout =
-      layout_grid_new(state->width, state->height, state->stream_count);
   for (int i = 0; i < state->stream_count; i++) {
-    LayoutWindow pane = layout_grid_window(layout, i);
-    Window window = XCreateSimpleWindow(display, state->window, pane.x, pane.y,
-                                        pane.width, pane.height, 0, 0, 0);
+    Window window =
+        XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
     XSelectInput(display, window, ButtonPressMask);
-    XMapWindow(display, window);
     XSync(display, 0);
 
     mpv_handle *mpv = create_mpv(window, config.flags, config.streams[i].flags);
@@ -267,12 +322,15 @@ int main(int argc, char *argv[]) {
 
   setup();
 
-  setup_layout(config.layout_file);
+  if (config.layout_file != NULL)
+    load_layout(config.layout_file);
 
   setup_streams(config);
 
   for (int i = 0; i < state->stream_count; i++)
     sync_stream(i);
+
+  render();
 
   clock_set_fps(60);
 
@@ -309,7 +367,7 @@ int main(int argc, char *argv[]) {
       case ButtonPress:
         fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
         if (state->view == VIEW_FULLSCREEN) {
-          state->view = VIEW_GRID;
+          state->view = state->mode;
         } else {
           state->view = VIEW_FULLSCREEN;
           state->fullscreen_window = event.xbutton.window;
@@ -399,45 +457,8 @@ int main(int argc, char *argv[]) {
     }
 
     // X11 side effects
-    if (x11_sync) {
-      switch (state->view) {
-      case VIEW_FULLSCREEN: {
-        for (int i = 0; i < state->stream_count; i++) {
-          if (state->streams[i].window == state->fullscreen_window) {
-            XWindowAttributes root;
-            XGetWindowAttributes(display, state->window, &root);
-            XWindowChanges changes = {
-                .x = 0, .y = 0, .width = root.width, .height = root.height};
-            XConfigureWindow(display, state->streams[i].window,
-                             CWX | CWY | CWWidth | CWHeight, &changes);
-            XMapWindow(display, state->streams[i].window);
-
-          } else {
-            XUnmapWindow(display, state->streams[i].window);
-          }
-        }
-        break;
-      }
-      case VIEW_GRID: {
-        LayoutGrid layout =
-            layout_grid_new(state->width, state->height, state->stream_count);
-        for (int i = 0; i < state->stream_count; i++) {
-          LayoutWindow pane = layout_grid_window(layout, i);
-          XWindowChanges changes = {.x = pane.x,
-                                    .y = pane.y,
-                                    .width = pane.width,
-                                    .height = pane.height};
-          XConfigureWindow(display, state->streams[i].window,
-                           CWX | CWY | CWWidth | CWHeight, &changes);
-          XMapWindow(display, state->streams[i].window);
-        }
-        break;
-      }
-      case VIEW_PANES: {
-        break;
-      }
-      }
-    }
+    if (x11_sync)
+      render();
 
     clock_wait();
   }

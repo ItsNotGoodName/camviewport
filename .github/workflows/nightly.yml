@@ -34,6 +34,7 @@ jobs:
 
       - name: Build
         run: |
+          sudo apt update -y 
           sudo apt install -y libmpv-dev
           make nightly
           mkdir dist

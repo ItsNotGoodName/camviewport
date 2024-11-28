@@ -19,6 +19,13 @@ enum {
 } View;
 
 typedef struct {
+  KeyCode quit;
+  KeyCode home;
+  KeyCode next;
+  KeyCode previous;
+} KeyMap;
+
+typedef struct {
   Window window;
   mpv_handle *mpv;
   char *main;
@@ -35,9 +42,10 @@ typedef struct {
   int view;
   int mode;
   Window fullscreen_window;
-  LayoutFile file;
+  LayoutFile layout_file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
+  KeyMap key_map;
 } State;
 
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
@@ -46,16 +54,16 @@ const double MPV_MAX_DELAY_SEC = 0.5;
 const double MPV_MIN_DISPLAY_SEC = 0.1;
 const int MPV_TIMEOUT_SEC = 5;
 
-static Display *display;
-static Atom wm_delete_window;
-static State *state;
-
 static int time_now() { return (int)time(NULL); }
 
 static int on_x11_error(Display *d, XErrorEvent *e) {
   fprintf(stderr, "xlib: %d\n", e->error_code);
   return 0;
 }
+
+static Display *display;
+static Atom wm_delete_window;
+static State *state;
 
 void setup() {
   XSetErrorHandler(on_x11_error);
@@ -224,13 +232,13 @@ void render() {
     break;
   }
   case VIEW_LAYOUT: {
-    int visible = MIN(state->stream_count, state->file.pane_count);
+    int visible = MIN(state->stream_count, state->layout_file.pane_count);
     for (int i = 0; i < visible; i++) {
       XWindowChanges changes = {
-          .x = state->file.panes[i].x * state->width,
-          .y = state->file.panes[i].y * state->height,
-          .width = state->file.panes[i].width * state->width,
-          .height = state->file.panes[i].height * state->height,
+          .x = state->layout_file.panes[i].x * state->width,
+          .y = state->layout_file.panes[i].y * state->height,
+          .width = state->layout_file.panes[i].width * state->width,
+          .height = state->layout_file.panes[i].height * state->height,
       };
       XConfigureWindow(display, state->streams[i].window,
                        CWX | CWY | CWWidth | CWHeight, &changes);
@@ -245,18 +253,27 @@ void render() {
   }
 }
 
-void load_layout(char *layout_file) {
-  state->mode = VIEW_LAYOUT;
-  state->view = VIEW_LAYOUT;
-  if (ini_parse(layout_file, layout_file_parser, &state->file) < 0) {
-    fprintf(stderr, "Failed to load layout '%s'\n", layout_file);
-    exit(1);
+void load_config(Config config) {
+  // Load key map
+  state->key_map.quit = XKeysymToKeycode(display, config.key_map.quit);
+  state->key_map.home = XKeysymToKeycode(display, config.key_map.home);
+  state->key_map.next = XKeysymToKeycode(display, config.key_map.next);
+  state->key_map.previous = XKeysymToKeycode(display, config.key_map.previous);
+
+  // Load layout
+  if (config.layout_file) {
+    state->mode = VIEW_LAYOUT;
+    state->view = VIEW_LAYOUT;
+    if (ini_parse(config.layout_file, layout_file_parser, &state->layout_file) <
+        0) {
+      fprintf(stderr, "Failed to load layout '%s'\n", config.layout_file);
+      exit(1);
+    }
+
+    fprintf(stderr, "loading layout file: %s\n", state->layout_file.name);
   }
 
-  fprintf(stderr, "loading layout file: %s\n", state->file.name);
-}
-
-void setup_streams(Config config) {
+  // Load streams
   state->stream_count = config.stream_count;
 
   for (int i = 0; i < state->stream_count; i++) {
@@ -265,7 +282,8 @@ void setup_streams(Config config) {
     XSelectInput(display, window, ButtonPressMask);
     XSync(display, 0);
 
-    mpv_handle *mpv = create_mpv(window, config.flags, config.streams[i].flags);
+    mpv_handle *mpv =
+        create_mpv(window, config.mpv_flags, config.streams[i].mpv_flags);
 
     state->streams[i].window = window;
     state->streams[i].mpv = mpv;
@@ -313,20 +331,7 @@ void parse_config(int argc, char *argv[], Config *config) {
     die("No streams specified");
 }
 
-int main(int argc, char *argv[]) {
-  Config config = {
-      .config_file = "camviewport.ini",
-  };
-
-  parse_config(argc, argv, &config);
-
-  setup();
-
-  if (config.layout_file != NULL)
-    load_layout(config.layout_file);
-
-  setup_streams(config);
-
+void run() {
   for (int i = 0; i < state->stream_count; i++)
     sync_stream(i);
 
@@ -334,8 +339,7 @@ int main(int argc, char *argv[]) {
 
   clock_set_fps(60);
 
-  int quit = False;
-  while (!quit) {
+  while (True) {
     clock_start();
 
     Bool x11_sync = False;
@@ -347,15 +351,54 @@ int main(int argc, char *argv[]) {
       XNextEvent(display, &event);
       switch (event.type) {
       case ClientMessage:
-        if (event.xclient.data.l[0] == wm_delete_window) {
-          quit = True;
-        }
+        if (event.xclient.data.l[0] == wm_delete_window)
+          return;
         break;
       case KeyPress: {
         fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
-        if (event.xkey.keycode == XKeysymToKeycode(display, XK_q)) {
-          quit = True;
+        if (event.xkey.keycode == state->key_map.quit) {
+          return;
+        } else if (event.xkey.keycode == state->key_map.next) {
+          int index = state->stream_count - 1;
+
+          if (state->view == VIEW_FULLSCREEN) {
+            for (int i = 0; i < state->stream_count; i++) {
+              if (state->streams[i].window == state->fullscreen_window) {
+                index = i;
+                break;
+              }
+            }
+          }
+
+          state->view = VIEW_FULLSCREEN;
+          state->fullscreen_window =
+              state->streams[(index + 1) % state->stream_count].window;
+        } else if (event.xkey.keycode == state->key_map.previous) {
+          int index = 0;
+
+          if (state->view == VIEW_FULLSCREEN) {
+            for (int i = 0; i < state->stream_count; i++) {
+              if (state->streams[i].window == state->fullscreen_window) {
+                index = i;
+                break;
+              }
+            }
+          }
+
+          state->view = VIEW_FULLSCREEN;
+          state->fullscreen_window =
+              state
+                  ->streams[index - 1 >= 0 ? index - 1
+                                           : state->stream_count - 1]
+                  .window;
+        } else if (event.xkey.keycode == state->key_map.home) {
+          state->view = state->mode;
+        } else {
+          break;
         }
+
+        x11_sync = True;
+        mpv_sync = True;
         break;
       case ConfigureNotify:
         if (event.xconfigure.window == state->window) {
@@ -381,7 +424,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    for (int stream_index = 0; stream_index < config.stream_count;
+    for (int stream_index = 0; stream_index < state->stream_count;
          stream_index++) {
       double new_speed = 0;
       Bool ping = False;
@@ -396,16 +439,14 @@ int main(int argc, char *argv[]) {
           (state->streams[stream_index].pinged_at + MPV_TIMEOUT_SEC))
         reload_file = True;
 
-      // MPV events
+      // mpv events
       while (True) {
         mpv_event *mp_event =
             mpv_wait_event(state->streams[stream_index].mpv, 0);
         if (mp_event->event_id == MPV_EVENT_NONE)
           break;
-        if (mp_event->event_id == MPV_EVENT_SHUTDOWN) {
-          quit = True;
-          break;
-        }
+        if (mp_event->event_id == MPV_EVENT_SHUTDOWN)
+          return;
         if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
           mpv_event_log_message *msg = mp_event->data;
           fprintf(stderr, "mpv: %s", msg->text);
@@ -462,8 +503,27 @@ int main(int argc, char *argv[]) {
 
     clock_wait();
   }
+}
+
+int main(int argc, char *argv[]) {
+  Config config = {
+      .config_file = "camviewport.ini",
+      .key_map =
+          {
+              .quit = XStringToKeysym("q"),
+              .home = XStringToKeysym("Home"),
+              .next = XStringToKeysym("Right"),
+              .previous = XStringToKeysym("Left"),
+          },
+  };
+
+  parse_config(argc, argv, &config);
+
+  setup();
+
+  load_config(config);
+
+  run();
 
   destory();
-
-  return 0;
 }

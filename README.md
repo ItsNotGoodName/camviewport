@@ -14,6 +14,12 @@ File `camviewport.ini`.
 ; mpv options are prefixed with mpv-
 mpv-hwdec = vaapi
 
+; Key maps
+key-q = quit
+key-Home = home
+key-Right = next
+key-Left = previous
+
 [CAM-01]
 ; Main stream used in fullscreen and single view.
 main = rtsp://admin:password@192.168.1.108:554/cam/realmonitor?channel=1&subtype=0

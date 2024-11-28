@@ -1,6 +1,7 @@
 #include "layout.h"
 #include "util.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,24 +80,28 @@ int layout_file_parser(void *user, const char *section, const char *name,
       return 0;
     }
   } else {
-    int index = atoi(section);
-    if (index > MAX_STREAMS)
+    int pane = atoi(section);
+    if (pane > MAX_STREAMS)
       die("too many panes");
+    if (pane < 1) {
+      fprintf(stderr, "invalid pane: %d\n", pane);
+      exit(1);
+    }
 
     if (MATCH("x")) {
-      file->panes[index].x = ratio(value);
+      file->panes[pane - 1].x = ratio(value);
     } else if (MATCH("y")) {
-      file->panes[index].y = ratio(value);
+      file->panes[pane - 1].y = ratio(value);
     } else if (MATCH("w")) {
-      file->panes[index].width = ratio(value);
+      file->panes[pane - 1].width = ratio(value);
     } else if (MATCH("h")) {
-      file->panes[index].height = ratio(value);
+      file->panes[pane - 1].height = ratio(value);
     } else {
       return 0;
     }
 
-    if (file->pane_count < index)
-      file->pane_count = index;
+    if (file->pane_count < pane)
+      file->pane_count = pane;
   }
 
   return 1;

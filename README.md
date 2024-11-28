@@ -15,6 +15,10 @@ Sub stream is only used when the view is not fullscreen or grid with a single st
 
 Key maps can be defined via `key-*` name where `*` is a X11 key without `XK_`.
 
+# Installation
+
+The preferred method is to use the [Ansible role](https://github.com/ItsNotGoodName/ansible-role-camviewport) which sets up a headless installation.
+
 # Requirements
 
 ```

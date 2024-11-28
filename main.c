@@ -4,11 +4,9 @@
 #include "layout.h"
 #include "util.h"
 #include <X11/Xlib.h>
-#include <X11/keysym.h>
 #include <argp.h>
 #include <mpv/client.h>
 #include <pthread.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

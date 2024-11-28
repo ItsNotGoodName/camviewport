@@ -1,13 +1,13 @@
-#include "./inih/ini.h"
 #include "clock.h"
 #include "config.h"
 #include "layout.h"
+#include "player.h"
 #include "util.h"
 #include <X11/X.h>
 #include <X11/Xlib.h>
-#include <argp.h>
 #include <mpv/client.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -128,80 +128,6 @@ void destory() {
   XCloseDisplay(display);
 }
 
-mpv_handle *create_mpv(Window window, ConfigMpvFlags gflags,
-                       ConfigMpvFlags flags) {
-  mpv_handle *mpv = mpv_create();
-  if (mpv == NULL)
-    die("mpv context failed");
-
-  mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &window);
-  // mpv_set_option_string(mpv, "idle", "yes");
-  // mpv_set_option_string(mpv, "force-window", "yes");
-  mpv_set_option_string(mpv, "profile", "low-latency");
-  mpv_set_option_string(mpv, "cache", "now");
-  mpv_set_option_string(mpv, "input-cursor",
-                        "no"); // FIXME: this causes the cursor disappears on a
-                               // sub window when alt-tab is pressed, this only
-                               // happens to sub window the cursor is hovering
-  mpv_set_option_string(mpv, "ao",
-                        "null"); // FIXME: audio other than null causes crashes
-                                 // when started with startx
-  for (int i = 0; i < gflags.count; i++)
-    mpv_set_option_string(mpv, gflags.flags[i].name, gflags.flags[i].data);
-  for (int i = 0; i < flags.count; i++)
-    mpv_set_option_string(mpv, flags.flags[i].name, flags.flags[i].data);
-
-  mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING, MPV_FORMAT_DOUBLE);
-  mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
-                       MPV_FORMAT_DOUBLE);
-
-  if (mpv_initialize(mpv) < 0)
-    die("mpv init failed");
-
-  mpv_request_log_messages(mpv, "info");
-
-  return mpv;
-}
-
-void loadfile(mpv_handle *mpv, char *stream) {
-  const char *cmd[] = {"loadfile", stream, NULL};
-  int err = mpv_command(mpv, cmd) < 0;
-  if (err < 0)
-    fprintf(stderr, "failed to play mpv file: error %d", err);
-}
-
-void stop(mpv_handle *mpv) {
-  const char *cmd[] = {"stop", NULL};
-  int err = mpv_command(mpv, cmd) < 0;
-  if (err < 0)
-    fprintf(stderr, "failed to stop mpv file: error %d", err);
-}
-
-void sync_stream(int index) {
-  switch (state->view) {
-  case VIEW_FULLSCREEN: {
-    if (state->fullscreen_window == state->streams[index].window) {
-      loadfile(state->streams[index].mpv, state->streams[index].main);
-    } else {
-      stop(state->streams[index].mpv);
-    }
-    break;
-  }
-  case VIEW_GRID: {
-    char *stream = state->streams[index].sub;
-    if (state->stream_count == 1)
-      stream = state->streams[index].main;
-
-    loadfile(state->streams[index].mpv, stream);
-    break;
-  }
-  case VIEW_LAYOUT: {
-    loadfile(state->streams[index].mpv, state->streams[index].sub);
-    break;
-  }
-  }
-}
-
 Command update_dim(int width, int height) {
   state->width = width;
   state->height = height;
@@ -223,7 +149,7 @@ Command toggle_fullscreen(Window window) {
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
-Command toggle_next() {
+Command go_next() {
   int index = state->stream_count - 1;
 
   if (state->view == VIEW_FULLSCREEN) {
@@ -241,7 +167,7 @@ Command toggle_next() {
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
-Command toggle_previous() {
+Command go_previous() {
   int index = 0;
 
   if (state->view == VIEW_FULLSCREEN) {
@@ -260,7 +186,32 @@ Command toggle_previous() {
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
-void render() {
+void sync_mpv(int index) {
+  switch (state->view) {
+  case VIEW_FULLSCREEN: {
+    if (state->fullscreen_window == state->streams[index].window) {
+      player_loadfile(state->streams[index].mpv, state->streams[index].main);
+    } else {
+      player_stop(state->streams[index].mpv);
+    }
+    break;
+  }
+  case VIEW_GRID: {
+    char *stream = state->streams[index].sub;
+    if (state->stream_count == 1)
+      stream = state->streams[index].main;
+
+    player_loadfile(state->streams[index].mpv, stream);
+    break;
+  }
+  case VIEW_LAYOUT: {
+    player_loadfile(state->streams[index].mpv, state->streams[index].sub);
+    break;
+  }
+  }
+}
+
+void sync_x11() {
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     for (int i = 0; i < state->stream_count; i++) {
@@ -321,7 +272,7 @@ void render() {
 Command reload_layout_file() {
   if (!state->layout_file_path)
     return 0;
-  if (layout_reload(&state->layout_file, state->layout_file_path) < 0) {
+  if (layout_file_reload(&state->layout_file, state->layout_file_path) < 0) {
     fprintf(stderr, "Failed to load layout '%s'\n", state->layout_file_path);
     return 0;
   }
@@ -341,7 +292,7 @@ void load_config(Config config) {
     state->layout_file_path = config.layout_file;
     state->mode = VIEW_LAYOUT;
     state->view = VIEW_LAYOUT;
-    if (layout_reload(&state->layout_file, config.layout_file) < 0) {
+    if (layout_file_reload(&state->layout_file, config.layout_file) < 0) {
       fprintf(stderr, "Failed to load layout '%s'\n", config.layout_file);
       exit(1);
     }
@@ -351,15 +302,45 @@ void load_config(Config config) {
 
   // Load streams
   state->stream_count = config.stream_count;
-
   for (int i = 0; i < state->stream_count; i++) {
     Window window =
         XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
     XSelectInput(display, window, ButtonPressMask);
     XSync(display, 0);
 
-    mpv_handle *mpv =
-        create_mpv(window, config.mpv_flags, config.streams[i].mpv_flags);
+    mpv_handle *mpv = mpv_create();
+    if (mpv == NULL)
+      die("mpv context failed");
+
+    mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &window);
+    // mpv_set_option_string(mpv, "idle", "yes");
+    // mpv_set_option_string(mpv, "force-window", "yes");
+    mpv_set_option_string(mpv, "profile", "low-latency");
+    mpv_set_option_string(mpv, "cache", "now");
+    mpv_set_option_string(
+        mpv, "input-cursor",
+        "no"); // FIXME: this causes the cursor disappears on a
+               // sub window when alt-tab is pressed, this only
+               // happens to sub window the cursor is hovering
+    mpv_set_option_string(mpv, "ao",
+                          "null"); // FIXME: audio other than null causes
+                                   // crashes when started with startx
+    for (int i = 0; i < config.mpv_flags.count; i++)
+      mpv_set_option_string(mpv, config.mpv_flags.flags[i].name,
+                            config.mpv_flags.flags[i].data);
+    for (int i = 0; i < config.streams[i].mpv_flags.count; i++)
+      mpv_set_option_string(mpv, config.streams[i].mpv_flags.flags[i].name,
+                            config.streams[i].mpv_flags.flags[i].data);
+
+    mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
+                         MPV_FORMAT_DOUBLE);
+    mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
+                         MPV_FORMAT_DOUBLE);
+
+    if (mpv_initialize(mpv) < 0)
+      die("mpv init failed");
+
+    mpv_request_log_messages(mpv, "info");
 
     state->streams[i].window = window;
     state->streams[i].mpv = mpv;
@@ -371,47 +352,11 @@ void load_config(Config config) {
   }
 }
 
-static struct argp_option cli_options[] = {
-    {"version", 'v', 0, 0, "Show version"},
-    {"config", 'c', "FILENAME", 0, "Path to config file"},
-    {"layout", 'l', "LAYOUT", 0, "Path to layout file"},
-    {0}};
-
-static int config_cli_parser(int key, char *arg, struct argp_state *state) {
-  Config *config = state->input;
-
-  switch (key) {
-  case 'v':
-    printf("%s\n", VERSION);
-    exit(0);
-  case 'c':
-    config->config_file = arg;
-    break;
-  case 'l':
-    config->layout_file = arg;
-    break;
-  }
-  return 0;
-}
-
-void parse_config(int argc, char *argv[], Config *config) {
-  struct argp argp = {cli_options, config_cli_parser, 0, 0};
-  argp_parse(&argp, argc, argv, 0, 0, config);
-
-  if (ini_parse(config->config_file, config_file_parser, config) < 0) {
-    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
-    exit(1);
-  }
-
-  if (config->stream_count == 0)
-    die("No streams specified");
-}
-
 void run() {
   for (int i = 0; i < state->stream_count; i++)
-    sync_stream(i);
+    sync_mpv(i);
 
-  render();
+  sync_x11();
 
   clock_set_fps(60);
 
@@ -436,9 +381,9 @@ void run() {
         } else if (event.xkey.keycode == state->key_map.home) {
           command |= toggle_fullscreen(0);
         } else if (event.xkey.keycode == state->key_map.next) {
-          command |= toggle_next();
+          command |= go_next();
         } else if (event.xkey.keycode == state->key_map.previous) {
-          command |= toggle_previous();
+          command |= go_previous();
         } else if (event.xkey.keycode == state->key_map.reload) {
           command |= reload_layout_file();
         }
@@ -535,14 +480,14 @@ void run() {
         }
       }
       if (reload_file || command & COMMAND_SYNC_MPV)
-        sync_stream(stream_index);
+        sync_mpv(stream_index);
       if (reload_file || ping)
         state->streams[stream_index].pinged_at = time_now();
     }
 
     // X11 side effects
     if (command & COMMAND_SYNC_X11)
-      render();
+      sync_x11();
 
     clock_wait();
   }
@@ -561,7 +506,12 @@ int main(int argc, char *argv[]) {
           },
   };
 
-  parse_config(argc, argv, &config);
+  config_parse(&config, argc, argv);
+
+  if (config.show_version) {
+    printf("%s\n", VERSION);
+    exit(0);
+  }
 
   setup();
 

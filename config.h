@@ -29,6 +29,7 @@ typedef struct {
 } ConfigKeyMap;
 
 typedef struct {
+  int show_version;
   char *config_file;
   char *layout_file;
   ConfigMpvFlags mpv_flags;
@@ -37,5 +38,4 @@ typedef struct {
   ConfigKeyMap key_map;
 } Config;
 
-int config_file_parser(void *user, const char *section, const char *name,
-                       const char *value);
+void config_parse(Config *config, int argc, char *argv[]);

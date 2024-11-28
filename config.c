@@ -1,6 +1,9 @@
 #include "config.h"
+#include "./inih/ini.h"
 #include "util.h"
 #include <X11/Xlib.h>
+#include <argp.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MPV_FLAG_PREFIX "mpv-"
@@ -18,8 +21,8 @@ static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
   config->count++;
 }
 
-int config_file_parser(void *user, const char *section, const char *name,
-                       const char *value) {
+static int handler(void *user, const char *section, const char *name,
+                   const char *value) {
   Config *config = user;
 
 #define SECTION(n) strcmp(section, n) == 0
@@ -78,4 +81,40 @@ int config_file_parser(void *user, const char *section, const char *name,
   }
 
   return 1;
+}
+
+static struct argp_option options[] = {
+    {"version", 'v', 0, 0, "Show version"},
+    {"config", 'c', "FILENAME", 0, "Path to config file"},
+    {"layout", 'l', "LAYOUT", 0, "Path to layout file"},
+    {0}};
+
+static int parser(int key, char *arg, struct argp_state *state) {
+  Config *config = state->input;
+
+  switch (key) {
+  case 'v':
+    config->show_version = 1;
+    break;
+  case 'c':
+    config->config_file = arg;
+    break;
+  case 'l':
+    config->layout_file = arg;
+    break;
+  }
+  return 0;
+}
+
+void config_parse(Config *config, int argc, char *argv[]) {
+  struct argp argp = {options, parser, 0, 0};
+  argp_parse(&argp, argc, argv, 0, 0, config);
+
+  if (ini_parse(config->config_file, handler, config) < 0) {
+    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
+    exit(1);
+  }
+
+  if (config->stream_count == 0)
+    die("No streams specified");
 }

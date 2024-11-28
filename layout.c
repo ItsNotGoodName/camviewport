@@ -108,7 +108,7 @@ static int handler(void *user, const char *section, const char *name,
   return 1;
 }
 
-int layout_reload(LayoutFile *layout_file, const char *file_path) {
+int layout_file_reload(LayoutFile *layout_file, const char *file_path) {
   if (layout_file->name)
     free(layout_file->name);
   return ini_parse(file_path, handler, layout_file);

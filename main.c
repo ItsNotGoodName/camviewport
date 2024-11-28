@@ -73,6 +73,7 @@ void setup() {
     die("failed to open display");
 
   Window root = XDefaultRootWindow(display);
+  XSelectInput(display, root, StructureNotifyMask);
 
   XWindowAttributes root_window_attribute;
   if (XGetWindowAttributes(display, root, &root_window_attribute) < 0)
@@ -414,6 +415,14 @@ void run() {
           state->width = event.xconfigure.width;
           state->height = event.xconfigure.height;
           x11_sync = True;
+        } else {
+          // Assume this is the root window
+          XWindowChanges changes = {.x = 0,
+                                    .y = 0,
+                                    .width = event.xconfigure.width,
+                                    .height = event.xconfigure.height};
+          XConfigureWindow(display, state->window,
+                           CWX | CWY | CWWidth | CWHeight, &changes);
         }
         break;
       case ButtonPress:

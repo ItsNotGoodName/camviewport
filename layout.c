@@ -1,4 +1,5 @@
 #include "layout.h"
+#include "inih/ini.h"
 #include "util.h"
 #include <math.h>
 #include <stdio.h>
@@ -66,8 +67,8 @@ static double ratio(const char *maybe_ratio) {
   return top / bot;
 }
 
-int layout_file_parser(void *user, const char *section, const char *name,
-                       const char *value) {
+static int handler(void *user, const char *section, const char *name,
+                   const char *value) {
   LayoutFile *file = user;
 
 #define MATCH(n) strcmp(name, n) == 0
@@ -105,4 +106,10 @@ int layout_file_parser(void *user, const char *section, const char *name,
   }
 
   return 1;
+}
+
+int layout_reload(LayoutFile *layout_file, const char *file_path) {
+  if (layout_file->name)
+    free(layout_file->name);
+  return ini_parse(file_path, handler, layout_file);
 }

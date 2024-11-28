@@ -25,6 +25,7 @@ typedef struct {
   KeySym home;
   KeySym next;
   KeySym previous;
+  KeySym reload;
 } ConfigKeyMap;
 
 typedef struct {

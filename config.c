@@ -41,8 +41,8 @@ int config_file_parser(void *user, const char *section, const char *name,
         config->key_map.next = key_sym;
       else if (VALUE("previous"))
         config->key_map.previous = key_sym;
-      else
-        return 0;
+      else if (VALUE("reload"))
+        config->key_map.reload = key_sym;
     } else
       return 0;
     return 1;

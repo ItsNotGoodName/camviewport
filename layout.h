@@ -36,5 +36,4 @@ LayoutWindow layout_grid_window(LayoutGrid layout_grid, int index);
 
 LayoutWindow layout_pane_window(LayoutPane pane, int width, int height);
 
-int layout_file_parser(void *user, const char *section, const char *name,
-                       const char *value);
+int layout_reload(LayoutFile *layout_file, const char *file_path);

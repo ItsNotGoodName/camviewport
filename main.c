@@ -27,6 +27,7 @@ typedef struct {
   KeyCode home;
   KeyCode next;
   KeyCode previous;
+  KeyCode reload;
 } KeyMap;
 
 typedef struct {
@@ -46,6 +47,7 @@ typedef struct {
   View view;
   View mode;
   Window fullscreen_window;
+  char *layout_file_path;
   LayoutFile layout_file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
@@ -316,19 +318,30 @@ void render() {
   }
 }
 
+Command reload_layout_file() {
+  if (!state->layout_file_path)
+    return 0;
+  if (layout_reload(&state->layout_file, state->layout_file_path) < 0) {
+    fprintf(stderr, "Failed to load layout '%s'\n", state->layout_file_path);
+    return 0;
+  }
+  return COMMAND_SYNC_X11;
+}
+
 void load_config(Config config) {
   // Load key map
   state->key_map.quit = XKeysymToKeycode(display, config.key_map.quit);
   state->key_map.home = XKeysymToKeycode(display, config.key_map.home);
   state->key_map.next = XKeysymToKeycode(display, config.key_map.next);
   state->key_map.previous = XKeysymToKeycode(display, config.key_map.previous);
+  state->key_map.reload = XKeysymToKeycode(display, config.key_map.reload);
 
   // Load layout
   if (config.layout_file) {
+    state->layout_file_path = config.layout_file;
     state->mode = VIEW_LAYOUT;
     state->view = VIEW_LAYOUT;
-    if (ini_parse(config.layout_file, layout_file_parser, &state->layout_file) <
-        0) {
+    if (layout_reload(&state->layout_file, config.layout_file) < 0) {
       fprintf(stderr, "Failed to load layout '%s'\n", config.layout_file);
       exit(1);
     }
@@ -420,12 +433,14 @@ void run() {
         fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
         if (event.xkey.keycode == state->key_map.quit) {
           return;
+        } else if (event.xkey.keycode == state->key_map.home) {
+          command |= toggle_fullscreen(0);
         } else if (event.xkey.keycode == state->key_map.next) {
           command |= toggle_next();
         } else if (event.xkey.keycode == state->key_map.previous) {
           command |= toggle_previous();
-        } else if (event.xkey.keycode == state->key_map.home) {
-          command |= toggle_fullscreen(0);
+        } else if (event.xkey.keycode == state->key_map.reload) {
+          command |= reload_layout_file();
         }
         break;
       case ConfigureNotify:
@@ -542,6 +557,7 @@ int main(int argc, char *argv[]) {
               .home = XStringToKeysym("space"),
               .next = XStringToKeysym("l"),
               .previous = XStringToKeysym("h"),
+              .reload = XStringToKeysym("r"),
           },
   };
 

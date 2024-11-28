@@ -510,8 +510,8 @@ int main(int argc, char *argv[]) {
       .config_file = "camviewport.ini",
       .key_map =
           {
-              .quit = XStringToKeysym("q"),
-              .home = XStringToKeysym("Home"),
+              .quit = XStringToKeysym("XF86Back"),
+              .home = XStringToKeysym("Return"),
               .next = XStringToKeysym("Right"),
               .previous = XStringToKeysym("Left"),
           },

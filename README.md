@@ -29,8 +29,8 @@ File `camviewport.ini`.
 mpv-hwdec = vaapi
 
 ; Key maps
-key-q = quit
-key-Home = home
+key-XF86Back = quit
+key-Return = home
 key-Right = next
 key-Left = previous
 

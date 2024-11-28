@@ -391,12 +391,21 @@ void run() {
                   ->streams[index - 1 >= 0 ? index - 1
                                            : state->stream_count - 1]
                   .window;
+
         } else if (event.xkey.keycode == state->key_map.home) {
-          state->view = state->mode;
+          if (state->view == VIEW_FULLSCREEN) {
+            state->view = state->mode;
+          } else {
+            if (state->fullscreen_window) {
+              state->view = VIEW_FULLSCREEN;
+            } else if (state->stream_count > 0) {
+              state->view = VIEW_FULLSCREEN;
+              state->fullscreen_window = state->streams[0].window;
+            }
+          }
         } else {
           break;
         }
-
         x11_sync = True;
         mpv_sync = True;
         break;
@@ -510,10 +519,10 @@ int main(int argc, char *argv[]) {
       .config_file = "camviewport.ini",
       .key_map =
           {
-              .quit = XStringToKeysym("XF86Back"),
-              .home = XStringToKeysym("Return"),
-              .next = XStringToKeysym("Right"),
-              .previous = XStringToKeysym("Left"),
+              .quit = XStringToKeysym("q"),
+              .home = XStringToKeysym("space"),
+              .next = XStringToKeysym("l"),
+              .previous = XStringToKeysym("h"),
           },
   };
 

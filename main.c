@@ -3,6 +3,7 @@
 #include "config.h"
 #include "layout.h"
 #include "util.h"
+#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <argp.h>
 #include <mpv/client.h>
@@ -10,7 +11,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum {
+typedef enum {
+  COMMAND_SYNC_X11 = 0x00000001,
+  COMMAND_SYNC_MPV = 0x00000010,
+} Command;
+
+typedef enum {
   VIEW_GRID,
   VIEW_FULLSCREEN,
   VIEW_LAYOUT,
@@ -37,8 +43,8 @@ typedef struct {
   Window window;
   int width;
   int height;
-  int view;
-  int mode;
+  View view;
+  View mode;
   Window fullscreen_window;
   LayoutFile layout_file;
   int stream_count;
@@ -194,6 +200,64 @@ void sync_stream(int index) {
   }
 }
 
+Command update_dim(int width, int height) {
+  state->width = width;
+  state->height = height;
+  return COMMAND_SYNC_X11;
+}
+
+Command toggle_fullscreen(Window window) {
+  if (state->view == VIEW_FULLSCREEN) {
+    state->view = state->mode;
+  } else if (window) {
+    state->view = VIEW_FULLSCREEN;
+    state->fullscreen_window = window;
+  } else if (state->fullscreen_window) {
+    state->view = VIEW_FULLSCREEN;
+  } else if (state->stream_count > 0) {
+    state->view = VIEW_FULLSCREEN;
+    state->fullscreen_window = state->streams[0].window;
+  }
+  return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
+}
+
+Command toggle_next() {
+  int index = state->stream_count - 1;
+
+  if (state->view == VIEW_FULLSCREEN) {
+    for (int i = 0; i < state->stream_count; i++) {
+      if (state->streams[i].window == state->fullscreen_window) {
+        index = i;
+        break;
+      }
+    }
+  }
+
+  state->view = VIEW_FULLSCREEN;
+  state->fullscreen_window =
+      state->streams[(index + 1) % state->stream_count].window;
+  return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
+}
+
+Command toggle_previous() {
+  int index = 0;
+
+  if (state->view == VIEW_FULLSCREEN) {
+    for (int i = 0; i < state->stream_count; i++) {
+      if (state->streams[i].window == state->fullscreen_window) {
+        index = i;
+        break;
+      }
+    }
+  }
+
+  state->view = VIEW_FULLSCREEN;
+  state->fullscreen_window =
+      state->streams[index - 1 >= 0 ? index - 1 : state->stream_count - 1]
+          .window;
+  return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
+}
+
 void render() {
   switch (state->view) {
   case VIEW_FULLSCREEN: {
@@ -341,8 +405,7 @@ void run() {
   while (True) {
     clock_start();
 
-    Bool x11_sync = False;
-    Bool mpv_sync = False;
+    Command command = 0;
 
     // X11 events
     while (XPending(display)) {
@@ -358,61 +421,17 @@ void run() {
         if (event.xkey.keycode == state->key_map.quit) {
           return;
         } else if (event.xkey.keycode == state->key_map.next) {
-          int index = state->stream_count - 1;
-
-          if (state->view == VIEW_FULLSCREEN) {
-            for (int i = 0; i < state->stream_count; i++) {
-              if (state->streams[i].window == state->fullscreen_window) {
-                index = i;
-                break;
-              }
-            }
-          }
-
-          state->view = VIEW_FULLSCREEN;
-          state->fullscreen_window =
-              state->streams[(index + 1) % state->stream_count].window;
+          command |= toggle_next();
         } else if (event.xkey.keycode == state->key_map.previous) {
-          int index = 0;
-
-          if (state->view == VIEW_FULLSCREEN) {
-            for (int i = 0; i < state->stream_count; i++) {
-              if (state->streams[i].window == state->fullscreen_window) {
-                index = i;
-                break;
-              }
-            }
-          }
-
-          state->view = VIEW_FULLSCREEN;
-          state->fullscreen_window =
-              state
-                  ->streams[index - 1 >= 0 ? index - 1
-                                           : state->stream_count - 1]
-                  .window;
-
+          command |= toggle_previous();
         } else if (event.xkey.keycode == state->key_map.home) {
-          if (state->view == VIEW_FULLSCREEN) {
-            state->view = state->mode;
-          } else {
-            if (state->fullscreen_window) {
-              state->view = VIEW_FULLSCREEN;
-            } else if (state->stream_count > 0) {
-              state->view = VIEW_FULLSCREEN;
-              state->fullscreen_window = state->streams[0].window;
-            }
-          }
-        } else {
-          break;
+          command |= toggle_fullscreen(0);
         }
-        x11_sync = True;
-        mpv_sync = True;
         break;
       case ConfigureNotify:
         if (event.xconfigure.window == state->window) {
-          state->width = event.xconfigure.width;
-          state->height = event.xconfigure.height;
-          x11_sync = True;
+          command |=
+              update_dim(event.xconfigure.width, event.xconfigure.height);
         } else {
           // Assume this is the root window
           XWindowChanges changes = {.x = 0,
@@ -425,14 +444,7 @@ void run() {
         break;
       case ButtonPress:
         fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
-        if (state->view == VIEW_FULLSCREEN) {
-          state->view = state->mode;
-        } else {
-          state->view = VIEW_FULLSCREEN;
-          state->fullscreen_window = event.xbutton.window;
-        }
-        x11_sync = True;
-        mpv_sync = True;
+        command |= toggle_fullscreen(event.xbutton.window);
         break;
       default:
         fprintf(stderr, "unhandled X11 event: %d\n", event.type);
@@ -507,14 +519,14 @@ void run() {
           state->streams[stream_index].speed_updated_at = time_now();
         }
       }
-      if (reload_file || mpv_sync)
+      if (reload_file || command & COMMAND_SYNC_MPV)
         sync_stream(stream_index);
       if (reload_file || ping)
         state->streams[stream_index].pinged_at = time_now();
     }
 
     // X11 side effects
-    if (x11_sync)
+    if (command & COMMAND_SYNC_X11)
       render();
 
     clock_wait();

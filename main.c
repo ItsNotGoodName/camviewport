@@ -3,7 +3,6 @@
 #include "layout.h"
 #include "player.h"
 #include "util.h"
-#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <mpv/client.h>
 #include <pthread.h>
@@ -128,7 +127,7 @@ void destory() {
   XCloseDisplay(display);
 }
 
-Command update_dim(int width, int height) {
+Command update_size(int width, int height) {
   state->width = width;
   state->height = height;
   return COMMAND_SYNC_X11;
@@ -192,7 +191,7 @@ void sync_mpv(int index) {
     if (state->fullscreen_window == state->streams[index].window) {
       player_loadfile(state->streams[index].mpv, state->streams[index].main);
     } else {
-      player_stop(state->streams[index].mpv);
+      player_pause(state->streams[index].mpv);
     }
     break;
   }
@@ -302,7 +301,7 @@ void load_config(Config config) {
 
   // Load streams
   state->stream_count = config.stream_count;
-  for (int i = 0; i < state->stream_count; i++) {
+  for (int stream_i = 0; stream_i < state->stream_count; stream_i++) {
     Window window =
         XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
     XSelectInput(display, window, ButtonPressMask);
@@ -325,12 +324,17 @@ void load_config(Config config) {
     mpv_set_option_string(mpv, "ao",
                           "null"); // FIXME: audio other than null causes
                                    // crashes when started with startx
-    for (int j = 0; j < config.mpv_flags.count; j++)
-      mpv_set_option_string(mpv, config.mpv_flags.flags[j].name,
-                            config.mpv_flags.flags[j].data);
-    for (int j = 0; j < config.streams[i].mpv_flags.count; j++)
-      mpv_set_option_string(mpv, config.streams[i].mpv_flags.flags[j].name,
-                            config.streams[i].mpv_flags.flags[j].data);
+    for (int flag_i = 0; flag_i < config.mpv_flags.count; flag_i++)
+      mpv_set_option_string(mpv, config.mpv_flags.flags[flag_i].name,
+                            config.mpv_flags.flags[flag_i].data);
+    for (int flag_i = 0; flag_i < config.streams[stream_i].mpv_flags.count;
+         flag_i++)
+      mpv_set_option_string(
+          mpv, config.streams[stream_i].mpv_flags.flags[flag_i].name,
+          config.streams[stream_i].mpv_flags.flags[flag_i].data);
+    mpv_set_option_string(mpv, "no-keepaspect", "");
+    mpv_set_option_string(mpv, "glsl-shaders",
+                          "/home/gurnain/Downloads/nonlinear_stretch.glsl");
 
     mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
                          MPV_FORMAT_DOUBLE);
@@ -342,21 +346,25 @@ void load_config(Config config) {
 
     mpv_request_log_messages(mpv, "info");
 
-    state->streams[i].window = window;
-    state->streams[i].mpv = mpv;
-    state->streams[i].main = config.streams[i].main;
-    state->streams[i].sub = config.streams[i].sub;
-    state->streams[i].speed = 1.0;
-    state->streams[i].speed_updated_at = time_now();
-    state->streams[i].pinged_at = time_now();
+    state->streams[stream_i].window = window;
+    state->streams[stream_i].mpv = mpv;
+    state->streams[stream_i].main = config.streams[stream_i].main == 0
+                                        ? config.streams[stream_i].sub
+                                        : config.streams[stream_i].main;
+    state->streams[stream_i].sub = config.streams[stream_i].sub == 0
+                                       ? config.streams[stream_i].main
+                                       : config.streams[stream_i].sub;
+    state->streams[stream_i].speed = 1.0;
+    state->streams[stream_i].speed_updated_at = time_now();
+    state->streams[stream_i].pinged_at = time_now();
   }
 }
 
 void run() {
+  sync_x11();
+
   for (int i = 0; i < state->stream_count; i++)
     sync_mpv(i);
-
-  sync_x11();
 
   clock_set_fps(60);
 
@@ -391,7 +399,7 @@ void run() {
       case ConfigureNotify:
         if (event.xconfigure.window == state->window) {
           command |=
-              update_dim(event.xconfigure.width, event.xconfigure.height);
+              update_size(event.xconfigure.width, event.xconfigure.height);
         } else {
           // Assume this is the root window
           XWindowChanges changes = {.x = 0,
@@ -412,25 +420,22 @@ void run() {
       }
     }
 
-    for (int stream_index = 0; stream_index < state->stream_count;
-         stream_index++) {
+    for (int stream_i = 0; stream_i < state->stream_count; stream_i++) {
       double new_speed = 0;
       Bool ping = False;
       Bool reload_file = False;
 
       // Reset speed if stuck
-      if (time_now() > state->streams[stream_index].speed_updated_at + 5)
+      if (time_now() > state->streams[stream_i].speed_updated_at + 5)
         new_speed = 1.0;
 
       // Reload locked up stream
-      if (time_now() >
-          (state->streams[stream_index].pinged_at + MPV_TIMEOUT_SEC))
+      if (time_now() > (state->streams[stream_i].pinged_at + MPV_TIMEOUT_SEC))
         reload_file = True;
 
       // mpv events
       while (True) {
-        mpv_event *mp_event =
-            mpv_wait_event(state->streams[stream_index].mpv, 0);
+        mpv_event *mp_event = mpv_wait_event(state->streams[stream_i].mpv, 0);
         if (mp_event->event_id == MPV_EVENT_NONE)
           break;
         if (mp_event->event_id == MPV_EVENT_SHUTDOWN)
@@ -469,20 +474,20 @@ void run() {
       }
 
       // mpv side effects
-      if (new_speed && new_speed != state->streams[stream_index].speed) {
-        int err = mpv_set_property(state->streams[stream_index].mpv, "speed",
+      if (new_speed && new_speed != state->streams[stream_i].speed) {
+        int err = mpv_set_property(state->streams[stream_i].mpv, "speed",
                                    MPV_FORMAT_DOUBLE, &new_speed);
         if (err < 0)
           fprintf(stderr, "failed to mpv set speed: error %d", err);
         else {
-          state->streams[stream_index].speed = new_speed;
-          state->streams[stream_index].speed_updated_at = time_now();
+          state->streams[stream_i].speed = new_speed;
+          state->streams[stream_i].speed_updated_at = time_now();
         }
       }
       if (reload_file || command & COMMAND_SYNC_MPV)
-        sync_mpv(stream_index);
+        sync_mpv(stream_i);
       if (reload_file || ping)
-        state->streams[stream_index].pinged_at = time_now();
+        state->streams[stream_i].pinged_at = time_now();
     }
 
     // X11 side effects

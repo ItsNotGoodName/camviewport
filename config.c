@@ -5,6 +5,7 @@
 #include <argp.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MPV_FLAG_PREFIX "mpv-"
 #define MPV_FLAG_PREFIX_LEN 4
@@ -110,11 +111,10 @@ void config_parse(Config *config, int argc, char *argv[]) {
   struct argp argp = {options, parser, 0, 0};
   argp_parse(&argp, argc, argv, 0, 0, config);
 
-  if (ini_parse(config->config_file, handler, config) < 0) {
-    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
-    exit(1);
+  if (access(config->config_file, F_OK) == 0) {
+    if (ini_parse(config->config_file, handler, config) < 0) {
+      fprintf(stderr, "Failed to load '%s'\n", config->config_file);
+      exit(1);
+    }
   }
-
-  if (config->stream_count == 0)
-    die("No streams specified");
 }

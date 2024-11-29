@@ -185,6 +185,19 @@ Command go_previous() {
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
+// int should_play(int index) {
+//   switch (state->view) {
+//   case VIEW_FULLSCREEN: {
+//     return state->fullscreen_window == state->streams[index].window;
+//   }
+//   case VIEW_GRID:
+//   case VIEW_LAYOUT:
+//     return 1;
+//   default:
+//     return 0;
+//   }
+// }
+
 void sync_mpv(int index) {
   switch (state->view) {
   case VIEW_FULLSCREEN: {

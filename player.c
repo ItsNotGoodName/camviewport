@@ -2,14 +2,20 @@
 #include <stdio.h>
 
 void player_loadfile(mpv_handle *mpv, char *stream) {
-  const char *cmd[] = {"loadfile", stream, NULL};
+  // printf("I AM PLAYING\n");
+  const char *cmd[] = {"set", "pause", "no", NULL};
   int err = mpv_command(mpv, cmd) < 0;
   if (err < 0)
-    fprintf(stderr, "failed to play file: error %d", err);
+    fprintf(stderr, "failed to stop file: error %d", err);
+  const char *cmd2[] = {"loadfile", stream, NULL};
+  int err2 = mpv_command(mpv, cmd2) < 0;
+  if (err2 < 0)
+    fprintf(stderr, "failed to play file: error %d", err2);
 }
 
 void player_pause(mpv_handle *mpv) {
-  const char *cmd[] = {"set", "property", "pause", "true", NULL};
+  // printf("I AM PAUSING\n");
+  const char *cmd[] = {"set", "pause", "yes", NULL};
   int err = mpv_command(mpv, cmd) < 0;
   if (err < 0)
     fprintf(stderr, "failed to stop file: error %d", err);

@@ -325,12 +325,12 @@ void load_config(Config config) {
     mpv_set_option_string(mpv, "ao",
                           "null"); // FIXME: audio other than null causes
                                    // crashes when started with startx
-    for (int i = 0; i < config.mpv_flags.count; i++)
-      mpv_set_option_string(mpv, config.mpv_flags.flags[i].name,
-                            config.mpv_flags.flags[i].data);
-    for (int i = 0; i < config.streams[i].mpv_flags.count; i++)
-      mpv_set_option_string(mpv, config.streams[i].mpv_flags.flags[i].name,
-                            config.streams[i].mpv_flags.flags[i].data);
+    for (int j = 0; j < config.mpv_flags.count; j++)
+      mpv_set_option_string(mpv, config.mpv_flags.flags[j].name,
+                            config.mpv_flags.flags[j].data);
+    for (int j = 0; j < config.streams[i].mpv_flags.count; j++)
+      mpv_set_option_string(mpv, config.streams[i].mpv_flags.flags[j].name,
+                            config.streams[i].mpv_flags.flags[j].data);
 
     mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
                          MPV_FORMAT_DOUBLE);

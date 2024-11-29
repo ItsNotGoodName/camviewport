@@ -21,11 +21,11 @@ typedef struct {
 } ConfigStream;
 
 typedef struct {
-  KeySym quit;
-  KeySym home;
-  KeySym next;
-  KeySym previous;
-  KeySym reload;
+  KeySym quit[MAX_KEYBINDINGS];
+  KeySym home[MAX_KEYBINDINGS];
+  KeySym next[MAX_KEYBINDINGS];
+  KeySym previous[MAX_KEYBINDINGS];
+  KeySym reload[MAX_KEYBINDINGS];
 } ConfigKeyMap;
 
 typedef struct {

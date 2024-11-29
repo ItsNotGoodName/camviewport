@@ -1,6 +1,7 @@
 #include "config.h"
 #include "./inih/ini.h"
 #include "util.h"
+#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <argp.h>
 #include <stdlib.h>
@@ -22,6 +23,15 @@ static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
   config->count++;
 }
 
+static void add(KeySym keys[MAX_KEYBINDINGS], KeySym key) {
+  for (int i = 0; i < MAX_KEYBINDINGS; i++) {
+    if (keys[i] == 0) {
+      keys[i] = key;
+      break;
+    }
+  }
+}
+
 static int handler(void *user, const char *section, const char *name,
                    const char *value) {
   Config *config = user;
@@ -38,15 +48,15 @@ static int handler(void *user, const char *section, const char *name,
     else if (MATCH_KEY) {
       KeySym key_sym = XStringToKeysym(&name[KEY_FLAG_PREFIX_LEN]);
       if (VALUE("quit"))
-        config->key_map.quit = key_sym;
+        add(config->key_map.quit, key_sym);
       else if (VALUE("home"))
-        config->key_map.home = key_sym;
+        add(config->key_map.home, key_sym);
       else if (VALUE("next"))
-        config->key_map.next = key_sym;
+        add(config->key_map.next, key_sym);
       else if (VALUE("previous"))
-        config->key_map.previous = key_sym;
+        add(config->key_map.previous, key_sym);
       else if (VALUE("reload"))
-        config->key_map.reload = key_sym;
+        add(config->key_map.reload, key_sym);
     } else
       return 0;
     return 1;

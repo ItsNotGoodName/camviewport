@@ -22,11 +22,11 @@ typedef enum {
 } View;
 
 typedef struct {
-  KeyCode quit;
-  KeyCode home;
-  KeyCode next;
-  KeyCode previous;
-  KeyCode reload;
+  KeyCode quit[MAX_KEYBINDINGS];
+  KeyCode home[MAX_KEYBINDINGS];
+  KeyCode next[MAX_KEYBINDINGS];
+  KeyCode previous[MAX_KEYBINDINGS];
+  KeyCode reload[MAX_KEYBINDINGS];
 } KeyMap;
 
 typedef struct {
@@ -280,11 +280,15 @@ Command reload_layout_file() {
 
 void load_config(Config config) {
   // Load key map
-  state->key_map.quit = XKeysymToKeycode(display, config.key_map.quit);
-  state->key_map.home = XKeysymToKeycode(display, config.key_map.home);
-  state->key_map.next = XKeysymToKeycode(display, config.key_map.next);
-  state->key_map.previous = XKeysymToKeycode(display, config.key_map.previous);
-  state->key_map.reload = XKeysymToKeycode(display, config.key_map.reload);
+  for (int i = 0; i < MAX_KEYBINDINGS; i++) {
+    state->key_map.quit[i] = XKeysymToKeycode(display, config.key_map.quit[i]);
+    state->key_map.home[i] = XKeysymToKeycode(display, config.key_map.home[i]);
+    state->key_map.next[i] = XKeysymToKeycode(display, config.key_map.next[i]);
+    state->key_map.previous[i] =
+        XKeysymToKeycode(display, config.key_map.previous[i]);
+    state->key_map.reload[i] =
+        XKeysymToKeycode(display, config.key_map.reload[i]);
+  }
 
   // Load layout
   if (config.layout_file) {
@@ -384,16 +388,21 @@ void run() {
         break;
       case KeyPress: {
         fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
-        if (event.xkey.keycode == state->key_map.quit) {
-          return;
-        } else if (event.xkey.keycode == state->key_map.home) {
-          command |= toggle_fullscreen(0);
-        } else if (event.xkey.keycode == state->key_map.next) {
-          command |= go_next();
-        } else if (event.xkey.keycode == state->key_map.previous) {
-          command |= go_previous();
-        } else if (event.xkey.keycode == state->key_map.reload) {
-          command |= reload_layout_file();
+        for (int i = 0; i < MAX_KEYBINDINGS; i++) {
+          if (event.xkey.keycode == state->key_map.quit[i]) {
+            return;
+          } else if (event.xkey.keycode == state->key_map.home[i]) {
+            command |= toggle_fullscreen(0);
+          } else if (event.xkey.keycode == state->key_map.next[i]) {
+            command |= go_next();
+          } else if (event.xkey.keycode == state->key_map.previous[i]) {
+            command |= go_previous();
+          } else if (event.xkey.keycode == state->key_map.reload[i]) {
+            command |= reload_layout_file();
+          } else {
+            continue;
+          }
+          break;
         }
         break;
       case ConfigureNotify:
@@ -503,11 +512,11 @@ int main(int argc, char *argv[]) {
       .config_file = "camviewport.ini",
       .key_map =
           {
-              .quit = XStringToKeysym("q"),
-              .home = XStringToKeysym("space"),
-              .next = XStringToKeysym("l"),
-              .previous = XStringToKeysym("h"),
-              .reload = XStringToKeysym("r"),
+              .quit[MAX_KEYBINDINGS - 1] = XStringToKeysym("q"),
+              .home[MAX_KEYBINDINGS - 1] = XStringToKeysym("space"),
+              .next[MAX_KEYBINDINGS - 1] = XStringToKeysym("l"),
+              .previous[MAX_KEYBINDINGS - 1] = XStringToKeysym("h"),
+              .reload[MAX_KEYBINDINGS - 1] = XStringToKeysym("r"),
           },
   };
 

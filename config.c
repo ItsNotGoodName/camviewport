@@ -1,7 +1,6 @@
 #include "config.h"
 #include "./inih/ini.h"
 #include "util.h"
-#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <argp.h>
 #include <stdlib.h>
@@ -23,13 +22,12 @@ static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
   config->count++;
 }
 
-static void add(KeySym keys[MAX_KEYBINDINGS], KeySym key) {
-  for (int i = 0; i < MAX_KEYBINDINGS; i++) {
+static void add_key_sym(KeySym keys[MAX_KEYBINDINGS], KeySym key) {
+  for (int i = 0; i < MAX_KEYBINDINGS; i++)
     if (keys[i] == 0) {
       keys[i] = key;
       break;
     }
-  }
 }
 
 static int handler(void *user, const char *section, const char *name,
@@ -48,29 +46,31 @@ static int handler(void *user, const char *section, const char *name,
     else if (MATCH_KEY) {
       KeySym key_sym = XStringToKeysym(&name[KEY_FLAG_PREFIX_LEN]);
       if (VALUE("quit"))
-        add(config->key_map.quit, key_sym);
+        add_key_sym(config->key_map.quit, key_sym);
       else if (VALUE("home"))
-        add(config->key_map.home, key_sym);
+        add_key_sym(config->key_map.home, key_sym);
       else if (VALUE("next"))
-        add(config->key_map.next, key_sym);
+        add_key_sym(config->key_map.next, key_sym);
       else if (VALUE("previous"))
-        add(config->key_map.previous, key_sym);
+        add_key_sym(config->key_map.previous, key_sym);
       else if (VALUE("reload"))
-        add(config->key_map.reload, key_sym);
-    } else
+        add_key_sym(config->key_map.reload, key_sym);
+    } else if (MATCH("layout"))
+      config->layout_file = strdup(value);
+    else
       return 0;
     return 1;
   }
 
   // Get index
   int index = -1;
-  for (int i = 0; i < config->stream_count; i++) {
+  for (int i = 0; i < config->stream_count; i++)
     if (strcmp(config->streams[i].name, section) == 0) {
       // Found
       index = i;
       break;
     }
-  }
+
   if (index == -1) {
     // Create
     if (config->stream_count == MAX_STREAMS)
@@ -81,15 +81,14 @@ static int handler(void *user, const char *section, const char *name,
     config->stream_count++;
   }
 
-  if (MATCH("main")) {
+  if (MATCH("main"))
     config->streams[index].main = strdup(value);
-  } else if (MATCH("sub")) {
+  else if (MATCH("sub"))
     config->streams[index].sub = strdup(value);
-  } else if (MATCH_MPV) {
+  else if (MATCH_MPV)
     parse_mpv_flag(&config->streams[index].mpv_flags, name, value);
-  } else {
+  else
     return 0;
-  }
 
   return 1;
 }
@@ -121,10 +120,9 @@ void config_parse(Config *config, int argc, char *argv[]) {
   struct argp argp = {options, parser, 0, 0};
   argp_parse(&argp, argc, argv, 0, 0, config);
 
-  if (access(config->config_file, F_OK) == 0) {
-    if (ini_parse(config->config_file, handler, config) < 0) {
-      fprintf(stderr, "Failed to load '%s'\n", config->config_file);
-      exit(1);
-    }
+  if (access(config->config_file, F_OK) == 0 &&
+      ini_parse(config->config_file, handler, config) < 0) {
+    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
+    exit(1);
   }
 }

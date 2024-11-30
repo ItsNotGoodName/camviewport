@@ -39,6 +39,7 @@ jobs:
           make nightly
           mkdir dist
           cp camviewport dist/camviewport_Linux_X86_64
+          tar -czf dist/layouts.tar.gz layouts
 
       - name: Publish nightly
         env:

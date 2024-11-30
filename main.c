@@ -4,7 +4,6 @@
 #include "player.h"
 #include "util.h"
 #include <X11/Xlib.h>
-#include <mpv/client.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

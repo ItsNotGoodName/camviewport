@@ -82,9 +82,9 @@ static int handler(void *user, const char *section, const char *name,
   } else {
     int pane = atoi(section);
     if (pane > MAX_STREAMS)
-      die("too many panes");
+      die("too many streams");
     if (pane < 1) {
-      fprintf(stderr, "invalid pane: %d\n", pane);
+      fprintf(stderr, "invalid pane %d\n", pane);
       exit(1);
     }
 

@@ -284,7 +284,7 @@ Command reload_layout_file() {
   if (!state->layout_file_path)
     return 0;
   if (layout_file_reload(&state->layout_file, state->layout_file_path) < 0) {
-    fprintf(stderr, "Failed to load layout '%s'\n", state->layout_file_path);
+    fprintf(stderr, "failed to load layout '%s'\n", state->layout_file_path);
     return 0;
   }
   return COMMAND_SYNC_X11;
@@ -308,7 +308,7 @@ void load_config(Config config) {
     state->mode = VIEW_LAYOUT;
     state->view = VIEW_LAYOUT;
     if (layout_file_reload(&state->layout_file, config.layout_file) < 0) {
-      fprintf(stderr, "Failed to load layout '%s'\n", config.layout_file);
+      fprintf(stderr, "failed to load layout '%s'\n", config.layout_file);
       exit(1);
     }
 
@@ -325,7 +325,7 @@ void load_config(Config config) {
 
     mpv_handle *mpv = mpv_create();
     if (mpv == NULL)
-      die("mpv context failed");
+      die("failed to create mpv context");
 
     mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &window);
     // mpv_set_option_string(mpv, "idle", "yes");
@@ -348,17 +348,13 @@ void load_config(Config config) {
       mpv_set_option_string(
           mpv, config.streams[stream_i].mpv_flags.flags[flag_i].name,
           config.streams[stream_i].mpv_flags.flags[flag_i].data);
-    mpv_set_option_string(mpv, "no-keepaspect", "");
-    mpv_set_option_string(mpv, "glsl-shaders",
-                          "/home/gurnain/Downloads/nonlinear_stretch.glsl");
-
     mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
                          MPV_FORMAT_DOUBLE);
     mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
                          MPV_FORMAT_DOUBLE);
 
     if (mpv_initialize(mpv) < 0)
-      die("mpv init failed");
+      die("failed to init mpv");
 
     mpv_request_log_messages(mpv, "info");
 
@@ -463,7 +459,7 @@ void run() {
           return;
         if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
           mpv_event_log_message *msg = mp_event->data;
-          fprintf(stderr, "mpv: %s", msg->text);
+          fprintf(stderr, "mpv: %s\n", msg->text);
           continue;
         }
         if (mp_event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
@@ -499,7 +495,7 @@ void run() {
         int err = mpv_set_property(state->streams[stream_i].mpv, "speed",
                                    MPV_FORMAT_DOUBLE, &new_speed);
         if (err < 0)
-          fprintf(stderr, "failed to mpv set speed: error %d", err);
+          fprintf(stderr, "failed to mpv set speed: error %d\n", err);
         else {
           state->streams[stream_i].speed = new_speed;
           state->streams[stream_i].speed_updated_at = time_now();

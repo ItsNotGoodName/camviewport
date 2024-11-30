@@ -15,7 +15,7 @@
 static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
                            const char *value) {
   if (config->count == MAX_MPV_FLAGS)
-    die("too many flags");
+    die("too many mpv flags");
 
   config->flags[config->count].name = strdup(&name[MPV_FLAG_PREFIX_LEN]);
   config->flags[config->count].data = strdup(value);
@@ -122,7 +122,7 @@ void config_parse(Config *config, int argc, char *argv[]) {
 
   if (access(config->config_file, F_OK) == 0 &&
       ini_parse(config->config_file, handler, config) < 0) {
-    fprintf(stderr, "Failed to load '%s'\n", config->config_file);
+    fprintf(stderr, "failed to load '%s'\n", config->config_file);
     exit(1);
   }
 }

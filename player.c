@@ -6,11 +6,11 @@ void player_loadfile(mpv_handle *mpv, char *stream) {
   const char *cmd[] = {"set", "pause", "no", NULL};
   int err = mpv_command(mpv, cmd) < 0;
   if (err < 0)
-    fprintf(stderr, "failed to stop file: error %d", err);
+    fprintf(stderr, "failed to unpause file: error %d\n", err);
   const char *cmd2[] = {"loadfile", stream, NULL};
   int err2 = mpv_command(mpv, cmd2) < 0;
   if (err2 < 0)
-    fprintf(stderr, "failed to play file: error %d", err2);
+    fprintf(stderr, "failed to play file: error %d\n", err2);
 }
 
 void player_pause(mpv_handle *mpv) {
@@ -18,5 +18,5 @@ void player_pause(mpv_handle *mpv) {
   const char *cmd[] = {"set", "pause", "yes", NULL};
   int err = mpv_command(mpv, cmd) < 0;
   if (err < 0)
-    fprintf(stderr, "failed to stop file: error %d", err);
+    fprintf(stderr, "failed to pause file: error %d\n", err);
 }

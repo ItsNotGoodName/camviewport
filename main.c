@@ -203,7 +203,7 @@ void sync_mpv(int index) {
     if (state->fullscreen_window == state->streams[index].window) {
       player_loadfile(state->streams[index].mpv, state->streams[index].main);
     } else {
-      player_pause(state->streams[index].mpv);
+      player_stop(state->streams[index].mpv);
     }
     break;
   }

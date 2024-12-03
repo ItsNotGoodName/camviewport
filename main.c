@@ -1,9 +1,9 @@
 #include "clock.h"
 #include "config.h"
 #include "layout.h"
-#include "player.h"
 #include "util.h"
 #include <X11/Xlib.h>
+#include <mpv/client.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +30,7 @@ typedef struct {
 } KeyMap;
 
 typedef struct {
+  char *name;
   Window window;
   mpv_handle *mpv;
   char *main;
@@ -125,6 +126,30 @@ void destory() {
   XCloseDisplay(display);
 }
 
+void player_loadfile(int stream_i, char *stream) {
+  const char *cmd[] = {"loadfile", stream, NULL};
+  int err = mpv_command(state->streams[stream_i].mpv, cmd) < 0;
+  if (err < 0)
+    fprintf(stderr, "%s: failed to play file: %d\n",
+            state->streams[stream_i].name, err);
+}
+
+void player_stop(int stream_i) {
+  const char *cmd[] = {"stop", NULL};
+  int err = mpv_command(state->streams[stream_i].mpv, cmd) < 0;
+  if (err < 0)
+    fprintf(stderr, "%s: failed to stop file: %d\n",
+            state->streams[stream_i].name, err);
+}
+
+void player_set_speed(int stream_i, double speed) {
+  int err = mpv_set_property(state->streams[stream_i].mpv, "speed",
+                             MPV_FORMAT_DOUBLE, &speed);
+  if (err < 0)
+    fprintf(stderr, "%s: failed to set speed: %d\n",
+            state->streams[stream_i].name, err);
+}
+
 Command update_size(int width, int height) {
   state->width = width;
   state->height = height;
@@ -196,9 +221,9 @@ void sync_mpv(int index) {
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
-      player_loadfile(state->streams[index].mpv, state->streams[index].main);
+      player_loadfile(index, state->streams[index].main);
     } else {
-      player_stop(state->streams[index].mpv);
+      player_stop(index);
     }
     break;
   }
@@ -207,11 +232,11 @@ void sync_mpv(int index) {
     if (state->stream_count == 1)
       stream = state->streams[index].main;
 
-    player_loadfile(state->streams[index].mpv, stream);
+    player_loadfile(index, stream);
     break;
   }
   case VIEW_LAYOUT: {
-    player_loadfile(state->streams[index].mpv, state->streams[index].sub);
+    player_loadfile(index, state->streams[index].sub);
     break;
   }
   }
@@ -219,7 +244,7 @@ void sync_mpv(int index) {
 
 void sync_mpv_speed(int index) {
   // printf("DEBUG: syncing mpv speed: %d\n", index);
-  player_set_speed(state->streams[index].mpv, state->streams[index].speed);
+  player_set_speed(index, state->streams[index].speed);
 }
 
 void sync_x11() {
@@ -301,6 +326,7 @@ Command reload_layout_file() {
     fprintf(stderr, "failed to load layout '%s'\n", state->layout_file_path);
     return 0;
   }
+  fprintf(stderr, "reloaded layout file: %s\n", state->layout_file_path);
   return COMMAND_SYNC_X11;
 }
 
@@ -372,6 +398,7 @@ void load_config(Config config) {
 
     mpv_request_log_messages(mpv, "info");
 
+    state->streams[stream_i].name = config.streams[stream_i].name;
     state->streams[stream_i].window = window;
     state->streams[stream_i].mpv = mpv;
     state->streams[stream_i].main = config.streams[stream_i].main == 0
@@ -409,7 +436,7 @@ void run() {
           return;
         break;
       case KeyPress: {
-        fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
+        // fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
         for (int key_i = 0; key_i < MAX_KEYBINDINGS; key_i++) {
           if (event.xkey.keycode == state->key_map.quit[key_i]) {
             return;
@@ -442,11 +469,11 @@ void run() {
         }
         break;
       case ButtonPress:
-        fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
+        // fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
         root_command |= toggle_fullscreen(event.xbutton.window);
         break;
-      default:
-        fprintf(stderr, "unhandled X11 event: %d\n", event.type);
+        // default:
+        //   fprintf(stderr, "unhandled X11 event: %d\n", event.type);
       }
       }
     }
@@ -472,7 +499,7 @@ void run() {
           return;
         if (mp_event->event_id == MPV_EVENT_LOG_MESSAGE) {
           mpv_event_log_message *msg = mp_event->data;
-          fprintf(stderr, "mpv: %s\n", msg->text);
+          fprintf(stderr, "%s: %s", state->streams[stream_i].name, msg->text);
           continue;
         }
         if (mp_event->event_id == MPV_EVENT_PROPERTY_CHANGE) {
@@ -500,8 +527,9 @@ void run() {
           }
           continue;
         }
-        fprintf(stderr, "unhandled mpv event: %s\n",
-                mpv_event_name(mp_event->event_id));
+        // fprintf(stderr, "%s: unhandled mpv event: %s\n",
+        //         state->streams[stream_i].name,
+        //         mpv_event_name(mp_event->event_id));
       }
 
       // mpv side effects

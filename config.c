@@ -1,8 +1,8 @@
 #include "config.h"
+#include "./flag/flag.h"
 #include "./inih/ini.h"
 #include "util.h"
 #include <X11/Xlib.h>
-#include <argp.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -93,32 +93,10 @@ static int handler(void *user, const char *section, const char *name,
   return 1;
 }
 
-static struct argp_option options[] = {
-    {"version", 'v', 0, 0, "Show version"},
-    {"config", 'c', "FILENAME", 0, "Path to config file"},
-    {"layout", 'l', "LAYOUT", 0, "Path to layout file"},
-    {0}};
-
-static int parser(int key, char *arg, struct argp_state *state) {
-  Config *config = state->input;
-
-  switch (key) {
-  case 'v':
-    config->show_version = 1;
-    break;
-  case 'c':
-    config->config_file = arg;
-    break;
-  case 'l':
-    config->layout_file = arg;
-    break;
-  }
-  return 0;
-}
-
-void config_parse(Config *config, int argc, char *argv[]) {
-  struct argp argp = {options, parser, 0, 0};
-  argp_parse(&argp, argc, argv, 0, 0, config);
+void config_parse(Config *config, int argc, const char *argv[]) {
+  flag_str(&config->config_file, "config", "Path to config file");
+  flag_str(&config->layout_file, "layout", "Path to layout file");
+  flag_parse(argc, argv, VERSION);
 
   if (access(config->config_file, F_OK) == 0 &&
       ini_parse(config->config_file, handler, config) < 0) {

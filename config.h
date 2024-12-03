@@ -29,13 +29,12 @@ typedef struct {
 } ConfigKeyMap;
 
 typedef struct {
-  int show_version;
-  char *config_file;
-  char *layout_file;
+  const char *config_file;
+  const char *layout_file;
   ConfigMpvFlags mpv_flags;
   int stream_count;
   ConfigStream streams[MAX_STREAMS];
   ConfigKeyMap key_map;
 } Config;
 
-void config_parse(Config *config, int argc, char *argv[]);
+void config_parse(Config *config, int argc, const char *argv[]);

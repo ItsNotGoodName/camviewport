@@ -46,7 +46,7 @@ typedef struct {
   View view;
   View mode;
   Window fullscreen_window;
-  char *layout_file_path;
+  const char *layout_file_path;
   LayoutFile layout_file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
@@ -525,7 +525,7 @@ void run() {
   }
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, const char *argv[]) {
   Config config = {
       .config_file = "camviewport.ini",
       .key_map =
@@ -539,11 +539,6 @@ int main(int argc, char *argv[]) {
   };
 
   config_parse(&config, argc, argv);
-
-  if (config.show_version) {
-    printf("%s\n", VERSION);
-    exit(0);
-  }
 
   setup();
 

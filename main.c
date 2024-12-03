@@ -116,12 +116,10 @@ void *_destroy(void *ptr) {
 void destory() {
   // Concurrently shutdown all mpv handles
   pthread_t *threads = malloc(state->stream_count * sizeof(pthread_t));
-  for (int i = 0; i < state->stream_count; i++) {
+  for (int i = 0; i < state->stream_count; i++)
     pthread_create(&threads[i], NULL, _destroy, state->streams[i].mpv);
-  }
-  for (int i = 0; i < state->stream_count; i++) {
+  for (int i = 0; i < state->stream_count; i++)
     pthread_join(threads[i], NULL);
-  }
   free(threads);
 
   XCloseDisplay(display);
@@ -151,14 +149,12 @@ Command toggle_fullscreen(Window window) {
 Command go_next() {
   int index = state->stream_count - 1;
 
-  if (state->view == VIEW_FULLSCREEN) {
-    for (int i = 0; i < state->stream_count; i++) {
+  if (state->view == VIEW_FULLSCREEN)
+    for (int i = 0; i < state->stream_count; i++)
       if (state->streams[i].window == state->fullscreen_window) {
         index = i;
         break;
       }
-    }
-  }
 
   state->view = VIEW_FULLSCREEN;
   state->fullscreen_window =
@@ -169,14 +165,12 @@ Command go_next() {
 Command go_previous() {
   int index = 0;
 
-  if (state->view == VIEW_FULLSCREEN) {
-    for (int i = 0; i < state->stream_count; i++) {
+  if (state->view == VIEW_FULLSCREEN)
+    for (int i = 0; i < state->stream_count; i++)
       if (state->streams[i].window == state->fullscreen_window) {
         index = i;
         break;
       }
-    }
-  }
 
   state->view = VIEW_FULLSCREEN;
   state->fullscreen_window =
@@ -198,6 +192,7 @@ int is_mpv_playing(int index) {
 }
 
 void sync_mpv(int index) {
+  // printf("DEBUG: syncing mpv: %d\n", index);
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
@@ -223,13 +218,12 @@ void sync_mpv(int index) {
 }
 
 void sync_mpv_speed(int index) {
-  int err = mpv_set_property(state->streams[index].mpv, "speed",
-                             MPV_FORMAT_DOUBLE, &state->streams[index].speed);
-  if (err < 0)
-    fprintf(stderr, "failed to set mpv speed: error %d\n", err);
+  // printf("DEBUG: syncing mpv speed: %d\n", index);
+  player_set_speed(state->streams[index].mpv, state->streams[index].speed);
 }
 
 void sync_x11() {
+  // printf("DEBUG: syncing x11\n");
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     for (int i = 0; i < state->stream_count; i++) {
@@ -337,7 +331,7 @@ void load_config(Config config) {
 
   // Load streams
   state->stream_count = config.stream_count;
-  for (int stream_i = 0; stream_i < state->stream_count; stream_i++) {
+  for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
     Window window =
         XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
     XSelectInput(display, window, ButtonPressMask);
@@ -355,7 +349,7 @@ void load_config(Config config) {
     mpv_set_option_string(
         mpv, "input-cursor",
         "no"); // FIXME: this causes the cursor disappears on a
-               // sub window when alt-tab is pressed, this only
+               // sub window when alt-tab is pressed, it only
                // happens to sub window the cursor is hovering
     mpv_set_option_string(mpv, "ao",
                           "null"); // FIXME: audio other than null causes
@@ -416,16 +410,16 @@ void run() {
         break;
       case KeyPress: {
         fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);
-        for (int i = 0; i < MAX_KEYBINDINGS; i++) {
-          if (event.xkey.keycode == state->key_map.quit[i]) {
+        for (int key_i = 0; key_i < MAX_KEYBINDINGS; key_i++) {
+          if (event.xkey.keycode == state->key_map.quit[key_i]) {
             return;
-          } else if (event.xkey.keycode == state->key_map.home[i]) {
+          } else if (event.xkey.keycode == state->key_map.home[key_i]) {
             root_command |= toggle_fullscreen(0);
-          } else if (event.xkey.keycode == state->key_map.next[i]) {
+          } else if (event.xkey.keycode == state->key_map.next[key_i]) {
             root_command |= go_next();
-          } else if (event.xkey.keycode == state->key_map.previous[i]) {
+          } else if (event.xkey.keycode == state->key_map.previous[key_i]) {
             root_command |= go_previous();
-          } else if (event.xkey.keycode == state->key_map.reload[i]) {
+          } else if (event.xkey.keycode == state->key_map.reload[key_i]) {
             root_command |= reload_layout_file();
           } else {
             continue;

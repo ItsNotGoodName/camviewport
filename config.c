@@ -22,7 +22,7 @@ static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
   config->count++;
 }
 
-static void add_key_sym(KeySym keys[MAX_KEYBINDINGS], KeySym key) {
+static void append_key_sym(KeySym keys[MAX_KEYBINDINGS], KeySym key) {
   for (int i = 0; i < MAX_KEYBINDINGS; i++)
     if (keys[i] == 0) {
       keys[i] = key;
@@ -46,15 +46,15 @@ static int handler(void *user, const char *section, const char *name,
     else if (MATCH_KEY) {
       KeySym key_sym = XStringToKeysym(&name[KEY_FLAG_PREFIX_LEN]);
       if (VALUE("quit"))
-        add_key_sym(config->key_map.quit, key_sym);
+        append_key_sym(config->key_map.quit, key_sym);
       else if (VALUE("home"))
-        add_key_sym(config->key_map.home, key_sym);
+        append_key_sym(config->key_map.home, key_sym);
       else if (VALUE("next"))
-        add_key_sym(config->key_map.next, key_sym);
+        append_key_sym(config->key_map.next, key_sym);
       else if (VALUE("previous"))
-        add_key_sym(config->key_map.previous, key_sym);
+        append_key_sym(config->key_map.previous, key_sym);
       else if (VALUE("reload"))
-        add_key_sym(config->key_map.reload, key_sym);
+        append_key_sym(config->key_map.reload, key_sym);
     } else if (MATCH("layout"))
       config->layout_file = strdup(value);
     else

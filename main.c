@@ -12,6 +12,7 @@
 typedef enum {
   COMMAND_SYNC_X11 = 0x00000001,
   COMMAND_SYNC_MPV = 0x00000010,
+  COMMAND_SYNC_SPEED = 0x00000100,
 } Command;
 
 typedef enum {
@@ -184,18 +185,17 @@ Command go_previous() {
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
-// int should_play(int index) {
-//   switch (state->view) {
-//   case VIEW_FULLSCREEN: {
-//     return state->fullscreen_window == state->streams[index].window;
-//   }
-//   case VIEW_GRID:
-//   case VIEW_LAYOUT:
-//     return 1;
-//   default:
-//     return 0;
-//   }
-// }
+int is_mpv_playing(int index) {
+  switch (state->view) {
+  case VIEW_FULLSCREEN:
+    return state->fullscreen_window == state->streams[index].window;
+  case VIEW_GRID:
+  case VIEW_LAYOUT:
+    return 1;
+  default:
+    return 0;
+  }
+}
 
 void sync_mpv(int index) {
   switch (state->view) {
@@ -220,6 +220,13 @@ void sync_mpv(int index) {
     break;
   }
   }
+}
+
+void sync_mpv_speed(int index) {
+  int err = mpv_set_property(state->streams[index].mpv, "speed",
+                             MPV_FORMAT_DOUBLE, &state->streams[index].speed);
+  if (err < 0)
+    fprintf(stderr, "failed to set mpv speed: error %d\n", err);
 }
 
 void sync_x11() {
@@ -278,6 +285,19 @@ void sync_x11() {
     break;
   }
   }
+}
+
+Command update_mpv_speed(int stream_i, double new_speed) {
+  if (state->streams[stream_i].speed == new_speed)
+    return 0;
+  state->streams[stream_i].speed = new_speed;
+  state->streams[stream_i].speed_updated_at = time_now();
+  return COMMAND_SYNC_SPEED;
+}
+
+Command reload_mpv(int stream_i) {
+  state->streams[stream_i].pinged_at = time_now();
+  return COMMAND_SYNC_MPV;
 }
 
 Command reload_layout_file() {
@@ -383,7 +403,7 @@ void run() {
   while (True) {
     clock_start();
 
-    Command command = 0;
+    Command root_command = 0;
 
     // X11 events
     while (XPending(display)) {
@@ -400,13 +420,13 @@ void run() {
           if (event.xkey.keycode == state->key_map.quit[i]) {
             return;
           } else if (event.xkey.keycode == state->key_map.home[i]) {
-            command |= toggle_fullscreen(0);
+            root_command |= toggle_fullscreen(0);
           } else if (event.xkey.keycode == state->key_map.next[i]) {
-            command |= go_next();
+            root_command |= go_next();
           } else if (event.xkey.keycode == state->key_map.previous[i]) {
-            command |= go_previous();
+            root_command |= go_previous();
           } else if (event.xkey.keycode == state->key_map.reload[i]) {
-            command |= reload_layout_file();
+            root_command |= reload_layout_file();
           } else {
             continue;
           }
@@ -415,7 +435,7 @@ void run() {
         break;
       case ConfigureNotify:
         if (event.xconfigure.window == state->window) {
-          command |=
+          root_command |=
               update_size(event.xconfigure.width, event.xconfigure.height);
         } else {
           // Assume this is the root window
@@ -429,7 +449,7 @@ void run() {
         break;
       case ButtonPress:
         fprintf(stderr, "ButtonPress: %u\n", event.xbutton.button);
-        command |= toggle_fullscreen(event.xbutton.window);
+        root_command |= toggle_fullscreen(event.xbutton.window);
         break;
       default:
         fprintf(stderr, "unhandled X11 event: %d\n", event.type);
@@ -438,17 +458,16 @@ void run() {
     }
 
     for (int stream_i = 0; stream_i < state->stream_count; stream_i++) {
-      double new_speed = 0;
-      Bool ping = False;
-      Bool reload_file = False;
+      Command sub_command = root_command;
+
+      // Reload locked up stream
+      if (is_mpv_playing(stream_i) &&
+          time_now() > (state->streams[stream_i].pinged_at + MPV_TIMEOUT_SEC))
+        sub_command |= reload_mpv(stream_i);
 
       // Reset speed if stuck
       if (time_now() > state->streams[stream_i].speed_updated_at + 5)
-        new_speed = 1.0;
-
-      // Reload locked up stream
-      if (time_now() > (state->streams[stream_i].pinged_at + MPV_TIMEOUT_SEC))
-        reload_file = True;
+        sub_command |= update_mpv_speed(stream_i, 1.0);
 
       // mpv events
       while (True) {
@@ -467,20 +486,21 @@ void run() {
           if (strcmp(property->name, MPV_PROPERTY_TIME_REMAINING)) {
             double *data = property->data;
             if (data) {
-              ping = True;
-              // fprintf(stderr,"property: %s: %f\n",
-              // MPV_PROPERTY_TIME_REMAINING, *data);
+              state->streams[stream_i].pinged_at = time_now();
+              // fprintf(stderr, "property: %s: %f\n",
+              // MPV_PROPERTY_TIME_REMAINING,
+              //         *data);
             }
           } else if (strcmp(property->name, MPV_PROPERTY_DEMUXER_CACHE_TIME)) {
             double *data = property->data;
             if (data) {
-              // fprintf(stderr,"property: %s: %f\n",
-              // MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
+              // fprintf(stderr, "property: %s: %f\n",
+              //         MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
               if (*data > MPV_MAX_DELAY_SEC) {
-                new_speed = 1.5;
+                sub_command |= update_mpv_speed(stream_i, 1.5);
               } else if (*data < MPV_MIN_DISPLAY_SEC) {
-                new_speed = 1.0;
+                sub_command |= update_mpv_speed(stream_i, 1.0);
               }
             }
           }
@@ -491,24 +511,14 @@ void run() {
       }
 
       // mpv side effects
-      if (new_speed && new_speed != state->streams[stream_i].speed) {
-        int err = mpv_set_property(state->streams[stream_i].mpv, "speed",
-                                   MPV_FORMAT_DOUBLE, &new_speed);
-        if (err < 0)
-          fprintf(stderr, "failed to mpv set speed: error %d\n", err);
-        else {
-          state->streams[stream_i].speed = new_speed;
-          state->streams[stream_i].speed_updated_at = time_now();
-        }
-      }
-      if (reload_file || command & COMMAND_SYNC_MPV)
+      if (sub_command & COMMAND_SYNC_MPV)
         sync_mpv(stream_i);
-      if (reload_file || ping)
-        state->streams[stream_i].pinged_at = time_now();
+      if (sub_command & COMMAND_SYNC_SPEED)
+        sync_mpv_speed(stream_i);
     }
 
     // X11 side effects
-    if (command & COMMAND_SYNC_X11)
+    if (root_command & COMMAND_SYNC_X11)
       sync_x11();
 
     clock_wait();

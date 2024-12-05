@@ -42,3 +42,5 @@ typedef struct {
 } Config;
 
 void config_parse(Config *config, int argc, const char *argv[]);
+
+void config_unique_merge_mpv_flags(ConfigMpvFlags *to, ConfigMpvFlags from);

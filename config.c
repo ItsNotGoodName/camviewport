@@ -125,3 +125,22 @@ void config_parse(Config *config, int argc, const char *argv[]) {
     exit(1);
   }
 }
+
+void config_unique_merge_mpv_flags(ConfigMpvFlags *to, ConfigMpvFlags from) {
+  for (int from_i = 0; from_i < from.count; from_i++) {
+    if (to->count == MAX_MPV_FLAGS)
+      return;
+
+    for (int to_i = 0; to_i < to->count; to_i++) {
+      if (strcmp(to->flags[to_i].name, from.flags[from_i].name) == 0) {
+        goto end; // break outer loop
+      }
+    }
+
+    to->flags[to->count].name = from.flags[from_i].name;
+    to->flags[to->count].data = from.flags[from_i].data;
+    to->count++;
+
+  end: {}
+  }
+}

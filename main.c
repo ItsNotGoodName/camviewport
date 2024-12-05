@@ -48,14 +48,12 @@ typedef struct {
   int width;
   int height;
   View view;
-  View mode;
+  View default_view;
   Window fullscreen_window;
   const char *layout_file_path;
   LayoutFile layout_file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
-  ConfigMpvFlags main_mpv_flags;
-  ConfigMpvFlags sub_mpv_flags;
   KeyMap key_map;
 } State;
 
@@ -163,7 +161,7 @@ Command update_size(int width, int height) {
 
 Command toggle_fullscreen(Window window) {
   if (state->view == VIEW_FULLSCREEN) {
-    state->view = state->mode;
+    state->view = state->default_view;
   } else if (window) {
     state->view = VIEW_FULLSCREEN;
     state->fullscreen_window = window;
@@ -238,7 +236,6 @@ void sync_mpv(int index) {
   case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
       player_loadfile(index, state->streams[index].main);
-      apply_mpv_flags_property(mpv, state->main_mpv_flags);
       apply_mpv_flags_property(mpv, state->streams[index].main_mpv_flags);
     } else {
       player_stop(index);
@@ -249,11 +246,9 @@ void sync_mpv(int index) {
   case VIEW_GRID: {
     if (state->stream_count == 1) {
       player_loadfile(index, state->streams[index].main);
-      apply_mpv_flags_property(mpv, state->main_mpv_flags);
       apply_mpv_flags_property(mpv, state->streams[index].main_mpv_flags);
     } else {
       player_loadfile(index, state->streams[index].sub);
-      apply_mpv_flags_property(mpv, state->sub_mpv_flags);
       apply_mpv_flags_property(mpv, state->streams[index].sub_mpv_flags);
     }
 
@@ -261,7 +256,6 @@ void sync_mpv(int index) {
   }
   case VIEW_LAYOUT: {
     player_loadfile(index, state->streams[index].sub);
-    apply_mpv_flags_property(mpv, state->sub_mpv_flags);
     apply_mpv_flags_property(mpv, state->streams[index].sub_mpv_flags);
     break;
   }
@@ -374,7 +368,7 @@ void load_config(Config config) {
   // Load layout
   if (config.layout_file) {
     state->layout_file_path = config.layout_file;
-    state->mode = VIEW_LAYOUT;
+    state->default_view = VIEW_LAYOUT;
     state->view = VIEW_LAYOUT;
     if (layout_file_reload(&state->layout_file, config.layout_file) < 0) {
       fprintf(stderr, "failed to load layout '%s'\n", config.layout_file);
@@ -386,8 +380,6 @@ void load_config(Config config) {
 
   // Load streams
   state->stream_count = config.stream_count;
-  state->main_mpv_flags = config.main_mpv_flags;
-  state->sub_mpv_flags = config.sub_mpv_flags;
   for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
     Window window =
         XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
@@ -412,8 +404,11 @@ void load_config(Config config) {
                           "null"); // FIXME: audio other than null causes
                                    // crashes when started with startx
 
-    apply_mpv_flags_option(mpv, config.mpv_flags);
-    apply_mpv_flags_option(mpv, config.streams[stream_i].mpv_flags);
+    // Apply global and scoped options
+    ConfigMpvFlags options = {};
+    config_unique_merge_mpv_flags(&options, config.mpv_flags);
+    config_unique_merge_mpv_flags(&options, config.streams[stream_i].mpv_flags);
+    apply_mpv_flags_option(mpv, options);
 
     mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
                          MPV_FORMAT_DOUBLE);
@@ -437,10 +432,16 @@ void load_config(Config config) {
     state->streams[stream_i].speed = 1.0;
     state->streams[stream_i].speed_updated_at = time_now();
     state->streams[stream_i].pinged_at = time_now();
-    state->streams[stream_i].main_mpv_flags =
-        config.streams[stream_i].main_mpv_flags;
-    state->streams[stream_i].sub_mpv_flags =
-        config.streams[stream_i].sub_mpv_flags;
+
+    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags,
+                                  config.main_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags,
+                                  config.streams[stream_i].main_mpv_flags);
+
+    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags,
+                                  config.sub_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags,
+                                  config.streams[stream_i].sub_mpv_flags);
   }
 }
 

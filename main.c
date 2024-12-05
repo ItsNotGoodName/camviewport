@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 typedef enum {
   COMMAND_SYNC_X11 = 0x00000001,
@@ -38,6 +39,8 @@ typedef struct {
   double speed;
   int speed_updated_at;
   int pinged_at;
+  ConfigMpvFlags main_mpv_flags;
+  ConfigMpvFlags sub_mpv_flags;
 } StreamState;
 
 typedef struct {
@@ -51,6 +54,8 @@ typedef struct {
   LayoutFile layout_file;
   int stream_count;
   StreamState streams[MAX_STREAMS];
+  ConfigMpvFlags main_mpv_flags;
+  ConfigMpvFlags sub_mpv_flags;
   KeyMap key_map;
 } State;
 
@@ -216,27 +221,48 @@ int is_mpv_playing(int index) {
   }
 }
 
+void apply_mpv_flags_property(mpv_handle *mpv, ConfigMpvFlags f) {
+  for (int i = 0; i < f.count; i++)
+    mpv_set_property_string(mpv, f.flags[i].name, f.flags[i].data);
+}
+
+void apply_mpv_flags_option(mpv_handle *mpv, ConfigMpvFlags f) {
+  for (int i = 0; i < f.count; i++)
+    mpv_set_option_string(mpv, f.flags[i].name, f.flags[i].data);
+}
+
 void sync_mpv(int index) {
   // printf("DEBUG: syncing mpv: %d\n", index);
+  mpv_handle *mpv = state->streams[index].mpv;
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
       player_loadfile(index, state->streams[index].main);
+      apply_mpv_flags_property(mpv, state->main_mpv_flags);
+      apply_mpv_flags_property(mpv, state->streams[index].main_mpv_flags);
     } else {
       player_stop(index);
     }
+
     break;
   }
   case VIEW_GRID: {
-    char *stream = state->streams[index].sub;
-    if (state->stream_count == 1)
-      stream = state->streams[index].main;
+    if (state->stream_count == 1) {
+      player_loadfile(index, state->streams[index].main);
+      apply_mpv_flags_property(mpv, state->main_mpv_flags);
+      apply_mpv_flags_property(mpv, state->streams[index].main_mpv_flags);
+    } else {
+      player_loadfile(index, state->streams[index].sub);
+      apply_mpv_flags_property(mpv, state->sub_mpv_flags);
+      apply_mpv_flags_property(mpv, state->streams[index].sub_mpv_flags);
+    }
 
-    player_loadfile(index, stream);
     break;
   }
   case VIEW_LAYOUT: {
     player_loadfile(index, state->streams[index].sub);
+    apply_mpv_flags_property(mpv, state->sub_mpv_flags);
+    apply_mpv_flags_property(mpv, state->streams[index].sub_mpv_flags);
     break;
   }
   }
@@ -357,6 +383,8 @@ void load_config(Config config) {
 
   // Load streams
   state->stream_count = config.stream_count;
+  state->main_mpv_flags = config.main_mpv_flags;
+  state->sub_mpv_flags = config.sub_mpv_flags;
   for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
     Window window =
         XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
@@ -380,14 +408,10 @@ void load_config(Config config) {
     mpv_set_option_string(mpv, "ao",
                           "null"); // FIXME: audio other than null causes
                                    // crashes when started with startx
-    for (int flag_i = 0; flag_i < config.mpv_flags.count; flag_i++)
-      mpv_set_option_string(mpv, config.mpv_flags.flags[flag_i].name,
-                            config.mpv_flags.flags[flag_i].data);
-    for (int flag_i = 0; flag_i < config.streams[stream_i].mpv_flags.count;
-         flag_i++)
-      mpv_set_option_string(
-          mpv, config.streams[stream_i].mpv_flags.flags[flag_i].name,
-          config.streams[stream_i].mpv_flags.flags[flag_i].data);
+
+    apply_mpv_flags_option(mpv, config.mpv_flags);
+    apply_mpv_flags_option(mpv, config.streams[stream_i].mpv_flags);
+
     mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
                          MPV_FORMAT_DOUBLE);
     mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
@@ -410,6 +434,10 @@ void load_config(Config config) {
     state->streams[stream_i].speed = 1.0;
     state->streams[stream_i].speed_updated_at = time_now();
     state->streams[stream_i].pinged_at = time_now();
+    state->streams[stream_i].main_mpv_flags =
+        config.streams[stream_i].main_mpv_flags;
+    state->streams[stream_i].sub_mpv_flags =
+        config.streams[stream_i].sub_mpv_flags;
   }
 }
 

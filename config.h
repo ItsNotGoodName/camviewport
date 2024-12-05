@@ -18,6 +18,8 @@ typedef struct {
   char *main;
   char *sub;
   ConfigMpvFlags mpv_flags;
+  ConfigMpvFlags main_mpv_flags;
+  ConfigMpvFlags sub_mpv_flags;
 } ConfigStream;
 
 typedef struct {
@@ -32,6 +34,8 @@ typedef struct {
   const char *config_file;
   const char *layout_file;
   ConfigMpvFlags mpv_flags;
+  ConfigMpvFlags main_mpv_flags;
+  ConfigMpvFlags sub_mpv_flags;
   int stream_count;
   ConfigStream streams[MAX_STREAMS];
   ConfigKeyMap key_map;

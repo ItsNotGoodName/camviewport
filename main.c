@@ -335,6 +335,9 @@ void sync_x11() {
 Command update_mpv_speed(int stream_i, double new_speed) {
   if (state->streams[stream_i].speed == new_speed)
     return 0;
+  fprintf(stderr, "%s: updating speed: %f -> %f\n",
+          state->streams[stream_i].name, state->streams[stream_i].speed,
+          new_speed);
   state->streams[stream_i].speed = new_speed;
   state->streams[stream_i].speed_updated_at = time_now();
   return COMMAND_SYNC_SPEED;

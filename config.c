@@ -7,14 +7,14 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MPV_FLAG_PREFIX "mpv-"
-#define MPV_FLAG_PREFIX_LEN 4
-#define MAIN_MPV_FLAG_PREFIX "main-mpv-"
-#define MAIN_MPV_FLAG_PREFIX_LEN 9
-#define SUB_MPV_FLAG_PREFIX "sub-mpv-"
-#define SUB_MPV_FLAG_PREFIX_LEN 8
-#define KEY_FLAG_PREFIX "key-"
-#define KEY_FLAG_PREFIX_LEN 4
+const char *MPV_FLAG_PREFIX = "mpv-";
+const int MPV_FLAG_PREFIX_LEN = 4;
+const char *MAIN_MPV_FLAG_PREFIX = "main-mpv-";
+const int MAIN_MPV_FLAG_PREFIX_LEN = 9;
+const char *SUB_MPV_FLAG_PREFIX = "sub-mpv-";
+const int SUB_MPV_FLAG_PREFIX_LEN = 8;
+const char *KEY_FLAG_PREFIX = "key-";
+const int KEY_FLAG_PREFIX_LEN = 4;
 
 static void parse_mpv_flag(ConfigMpvFlags *config, const char *name,
                            const char *value, int prefix_len) {

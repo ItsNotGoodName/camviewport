@@ -1,3 +1,4 @@
+#include "main.h"
 #include "clock.h"
 #include "config.h"
 #include "layout.h"
@@ -273,14 +274,15 @@ void sync_x11() {
   case VIEW_FULLSCREEN: {
     for (int i = 0; i < state->stream_count; i++) {
       if (state->streams[i].window == state->fullscreen_window) {
-        XWindowAttributes root;
-        XGetWindowAttributes(display, state->window, &root);
-        XWindowChanges changes = {
-            .x = 0, .y = 0, .width = root.width, .height = root.height};
+        XWindowChanges changes = {.x = 0,
+                                  .y = 0,
+                                  .width = state->width,
+                                  .height = state->height,
+                                  .border_width = 0};
         XConfigureWindow(display, state->streams[i].window,
-                         CWX | CWY | CWWidth | CWHeight, &changes);
+                         CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
+                         &changes);
         XMapWindow(display, state->streams[i].window);
-
       } else {
         XUnmapWindow(display, state->streams[i].window);
       }
@@ -288,19 +290,31 @@ void sync_x11() {
     break;
   }
   case VIEW_GRID: {
-    LayoutGrid layout =
-        layout_grid_new(state->width, state->height, state->stream_count);
-    for (int i = 0; i < state->stream_count; i++) {
-      LayoutWindow pane = layout_grid_window(layout, i);
-      XWindowChanges changes = {
-          .x = pane.x,
-          .y = pane.y,
-          .width = pane.width,
-          .height = pane.height,
-      };
-      XConfigureWindow(display, state->streams[i].window,
-                       CWX | CWY | CWWidth | CWHeight, &changes);
-      XMapWindow(display, state->streams[i].window);
+    if (state->stream_count == 0) {
+      XWindowChanges changes = {.x = 0,
+                                .y = 0,
+                                .width = state->width,
+                                .height = state->height,
+                                .border_width = 0};
+      XConfigureWindow(display, state->streams[0].window,
+                       CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
+                       &changes);
+      XMapWindow(display, state->streams[0].window);
+    } else {
+      LayoutGrid layout =
+          layout_grid_new(state->width, state->height, state->stream_count);
+      for (int i = 0; i < state->stream_count; i++) {
+        LayoutWindow pane = layout_grid_window(layout, i);
+        XWindowChanges changes = {.x = pane.x,
+                                  .y = pane.y,
+                                  .width = pane.width - BORDER_WIDTH * 2,
+                                  .height = pane.height - BORDER_WIDTH * 2,
+                                  .border_width = BORDER_WIDTH};
+        XConfigureWindow(display, state->streams[i].window,
+                         CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
+                         &changes);
+        XMapWindow(display, state->streams[i].window);
+      }
     }
     break;
   }
@@ -310,11 +324,15 @@ void sync_x11() {
       XWindowChanges changes = {
           .x = state->layout_file.panes[i].x * state->width,
           .y = state->layout_file.panes[i].y * state->height,
-          .width = state->layout_file.panes[i].width * state->width,
-          .height = state->layout_file.panes[i].height * state->height,
+          .width = state->layout_file.panes[i].width * state->width -
+                   BORDER_WIDTH * 2,
+          .height = state->layout_file.panes[i].height * state->height -
+                    BORDER_WIDTH * 2,
+          .border_width = BORDER_WIDTH,
       };
       XConfigureWindow(display, state->streams[i].window,
-                       CWX | CWY | CWWidth | CWHeight, &changes);
+                       CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
+                       &changes);
       XMapWindow(display, state->streams[i].window);
     }
 
@@ -381,12 +399,12 @@ void load_config(Config config) {
   // Load streams
   state->stream_count = config.stream_count;
   for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
-    Window window =
-        XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, 0, 0, 0);
+    Window window = XCreateSimpleWindow(display, state->window, 0, 0, 1, 1,
+                                        BORDER_WIDTH, 0xffffff, 0);
     XSelectInput(display, window, ButtonPressMask);
     XSync(display, 0);
-
     mpv_handle *mpv = mpv_create();
+
     if (mpv == NULL)
       die("failed to create mpv context");
 

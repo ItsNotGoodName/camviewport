@@ -1,6 +1,7 @@
 #pragma once
 
 #include "main.h"
+
 #include <X11/X.h>
 
 typedef struct {

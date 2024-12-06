@@ -134,16 +134,14 @@ void player_loadfile(int stream_i, char *stream) {
   const char *cmd[] = {"loadfile", stream, NULL};
   int err = mpv_command(state->streams[stream_i].mpv, cmd) < 0;
   if (err < 0)
-    fprintf(stderr, "%s: failed to play file: %d\n",
-            state->streams[stream_i].name, err);
+    fprintf(stderr, "%s: failed to play file: %d\n", state->streams[stream_i].name, err);
 }
 
 void player_stop(int stream_i) {
   const char *cmd[] = {"stop", NULL};
   int err = mpv_command(state->streams[stream_i].mpv, cmd) < 0;
   if (err < 0)
-    fprintf(stderr, "%s: failed to stop file: %d\n",
-            state->streams[stream_i].name, err);
+    fprintf(stderr, "%s: failed to stop file: %d\n", state->streams[stream_i].name, err);
 }
 
 void player_set_speed(int stream_i, double speed) {
@@ -186,8 +184,7 @@ Command go_next() {
       }
 
   state->view = VIEW_FULLSCREEN;
-  state->fullscreen_window =
-      state->streams[(index + 1) % state->stream_count].window;
+  state->fullscreen_window = state->streams[(index + 1) % state->stream_count].window;
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
@@ -202,9 +199,7 @@ Command go_previous() {
       }
 
   state->view = VIEW_FULLSCREEN;
-  state->fullscreen_window =
-      state->streams[index - 1 >= 0 ? index - 1 : state->stream_count - 1]
-          .window;
+  state->fullscreen_window = state->streams[index - 1 >= 0 ? index - 1 : state->stream_count - 1].window;
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
@@ -220,19 +215,20 @@ int is_mpv_playing(int index) {
   }
 }
 
-void apply_mpv_flags_property(mpv_handle *mpv, ConfigMpvFlags f) {
-  for (int i = 0; i < f.count; i++)
-    mpv_set_property_string(mpv, f.flags[i].name, f.flags[i].data);
+void apply_mpv_flags_property(mpv_handle *mpv, ConfigMpvFlags flags) {
+  for (int i = 0; i < flags.count; i++)
+    mpv_set_property_string(mpv, flags.flags[i].name, flags.flags[i].data);
 }
 
-void apply_mpv_flags_option(mpv_handle *mpv, ConfigMpvFlags f) {
-  for (int i = 0; i < f.count; i++)
-    mpv_set_option_string(mpv, f.flags[i].name, f.flags[i].data);
+void apply_mpv_flags_option(mpv_handle *mpv, ConfigMpvFlags flags) {
+  for (int i = 0; i < flags.count; i++)
+    mpv_set_option_string(mpv, flags.flags[i].name, flags.flags[i].data);
 }
 
 void sync_mpv(int index) {
   // printf("DEBUG: syncing mpv: %d\n", index);
   mpv_handle *mpv = state->streams[index].mpv;
+
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     if (state->fullscreen_window == state->streams[index].window) {
@@ -279,9 +275,7 @@ void sync_x11() {
                                   .width = state->width,
                                   .height = state->height,
                                   .border_width = 0};
-        XConfigureWindow(display, state->streams[i].window,
-                         CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
-                         &changes);
+        XConfigureWindow(display, state->streams[i].window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
         XMapWindow(display, state->streams[i].window);
       } else {
         XUnmapWindow(display, state->streams[i].window);
@@ -296,13 +290,10 @@ void sync_x11() {
                                 .width = state->width,
                                 .height = state->height,
                                 .border_width = 0};
-      XConfigureWindow(display, state->streams[0].window,
-                       CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
-                       &changes);
+      XConfigureWindow(display, state->streams[0].window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
       XMapWindow(display, state->streams[0].window);
     } else {
-      LayoutGrid layout =
-          layout_grid_new(state->width, state->height, state->stream_count);
+      LayoutGrid layout = layout_grid_new(state->width, state->height, state->stream_count);
       for (int i = 0; i < state->stream_count; i++) {
         LayoutWindow pane = layout_grid_window(layout, i);
         XWindowChanges changes = {.x = pane.x,
@@ -310,9 +301,7 @@ void sync_x11() {
                                   .width = pane.width - BORDER_WIDTH * 2,
                                   .height = pane.height - BORDER_WIDTH * 2,
                                   .border_width = BORDER_WIDTH};
-        XConfigureWindow(display, state->streams[i].window,
-                         CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
-                         &changes);
+        XConfigureWindow(display, state->streams[i].window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
         XMapWindow(display, state->streams[i].window);
       }
     }
@@ -330,9 +319,7 @@ void sync_x11() {
                     BORDER_WIDTH * 2,
           .border_width = BORDER_WIDTH,
       };
-      XConfigureWindow(display, state->streams[i].window,
-                       CWX | CWY | CWWidth | CWHeight | CWBorderWidth,
-                       &changes);
+      XConfigureWindow(display, state->streams[i].window, CWX | CWY | CWWidth | CWHeight | CWBorderWidth, &changes);
       XMapWindow(display, state->streams[i].window);
     }
 
@@ -347,9 +334,7 @@ void sync_x11() {
 Command update_mpv_speed(int stream_i, double new_speed) {
   if (state->streams[stream_i].speed == new_speed)
     return 0;
-  fprintf(stderr, "%s: updating speed: %f -> %f\n",
-          state->streams[stream_i].name, state->streams[stream_i].speed,
-          new_speed);
+  fprintf(stderr, "%s: updating speed: %f -> %f\n", state->streams[stream_i].name, state->streams[stream_i].speed, new_speed);
   state->streams[stream_i].speed = new_speed;
   state->streams[stream_i].speed_updated_at = time_now();
   return COMMAND_SYNC_SPEED;
@@ -377,10 +362,8 @@ void load_config(Config config) {
     state->key_map.quit[i] = XKeysymToKeycode(display, config.key_map.quit[i]);
     state->key_map.home[i] = XKeysymToKeycode(display, config.key_map.home[i]);
     state->key_map.next[i] = XKeysymToKeycode(display, config.key_map.next[i]);
-    state->key_map.previous[i] =
-        XKeysymToKeycode(display, config.key_map.previous[i]);
-    state->key_map.reload[i] =
-        XKeysymToKeycode(display, config.key_map.reload[i]);
+    state->key_map.previous[i] = XKeysymToKeycode(display, config.key_map.previous[i]);
+    state->key_map.reload[i] = XKeysymToKeycode(display, config.key_map.reload[i]);
   }
 
   // Load layout
@@ -399,8 +382,7 @@ void load_config(Config config) {
   // Load streams
   state->stream_count = config.stream_count;
   for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
-    Window window = XCreateSimpleWindow(display, state->window, 0, 0, 1, 1,
-                                        BORDER_WIDTH, 0xffffff, 0);
+    Window window = XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, BORDER_WIDTH, 0xffffff, 0);
     XSelectInput(display, window, ButtonPressMask);
     XSync(display, 0);
     mpv_handle *mpv = mpv_create();
@@ -413,14 +395,8 @@ void load_config(Config config) {
     // mpv_set_option_string(mpv, "force-window", "yes");
     mpv_set_option_string(mpv, "profile", "low-latency");
     mpv_set_option_string(mpv, "cache", "now");
-    mpv_set_option_string(
-        mpv, "input-cursor",
-        "no"); // FIXME: this causes the cursor disappears on a
-               // sub window when alt-tab is pressed, it only
-               // happens to sub window the cursor is hovering
-    mpv_set_option_string(mpv, "ao",
-                          "null"); // FIXME: audio other than null causes
-                                   // crashes when started with startx
+    mpv_set_option_string(mpv, "input-cursor", "no"); // FIXME: this causes the cursor disappears on a sub window when alt-tab is pressed, it only happens to sub window the cursor is hovering
+    mpv_set_option_string(mpv, "ao", "null");         // FIXME: audio other than null causes crashes when started with startx
 
     // Apply global and scoped options
     ConfigMpvFlags options = {};
@@ -428,10 +404,8 @@ void load_config(Config config) {
     config_unique_merge_mpv_flags(&options, config.streams[stream_i].mpv_flags);
     apply_mpv_flags_option(mpv, options);
 
-    mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING,
-                         MPV_FORMAT_DOUBLE);
-    mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME,
-                         MPV_FORMAT_DOUBLE);
+    mpv_observe_property(mpv, 0, MPV_PROPERTY_TIME_REMAINING, MPV_FORMAT_DOUBLE);
+    mpv_observe_property(mpv, 0, MPV_PROPERTY_DEMUXER_CACHE_TIME, MPV_FORMAT_DOUBLE);
 
     if (mpv_initialize(mpv) < 0)
       die("failed to init mpv");
@@ -451,15 +425,11 @@ void load_config(Config config) {
     state->streams[stream_i].speed_updated_at = time_now();
     state->streams[stream_i].pinged_at = time_now();
 
-    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags,
-                                  config.main_mpv_flags);
-    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags,
-                                  config.streams[stream_i].main_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags, config.main_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].main_mpv_flags, config.streams[stream_i].main_mpv_flags);
 
-    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags,
-                                  config.sub_mpv_flags);
-    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags,
-                                  config.streams[stream_i].sub_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags, config.sub_mpv_flags);
+    config_unique_merge_mpv_flags(&state->streams[stream_i].sub_mpv_flags, config.streams[stream_i].sub_mpv_flags);
   }
 }
 
@@ -506,16 +476,14 @@ void run() {
         break;
       case ConfigureNotify:
         if (event.xconfigure.window == state->window) {
-          root_command |=
-              update_size(event.xconfigure.width, event.xconfigure.height);
+          root_command |= update_size(event.xconfigure.width, event.xconfigure.height);
         } else {
           // Assume this is the root window
           XWindowChanges changes = {.x = 0,
                                     .y = 0,
                                     .width = event.xconfigure.width,
                                     .height = event.xconfigure.height};
-          XConfigureWindow(display, state->window,
-                           CWX | CWY | CWWidth | CWHeight, &changes);
+          XConfigureWindow(display, state->window, CWX | CWY | CWWidth | CWHeight, &changes);
         }
         break;
       case ButtonPress:
@@ -532,8 +500,7 @@ void run() {
       Command sub_command = root_command;
 
       // Reload locked up stream
-      if (is_mpv_playing(stream_i) &&
-          time_now() > (state->streams[stream_i].pinged_at + MPV_TIMEOUT_SEC))
+      if (is_mpv_playing(stream_i) && time_now() > (state->streams[stream_i].pinged_at + MPV_TIMEOUT_SEC))
         sub_command |= reload_mpv(stream_i);
 
       // Reset speed if stuck

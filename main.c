@@ -46,11 +46,12 @@ typedef struct {
 
 typedef struct {
   Window window;
+  Window active_window;
+  Window fullscreen_window;
   int width;
   int height;
   View view;
   View default_view;
-  Window fullscreen_window;
   const char *layout_file_path;
   LayoutFile layout_file;
   int stream_count;
@@ -171,6 +172,13 @@ Command toggle_fullscreen(Window window) {
     state->fullscreen_window = state->streams[0].window;
   }
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
+}
+
+Command activate_window(Window window) {
+  if (window == state->active_window)
+    return 0;
+  state->active_window = window;
+  return COMMAND_SYNC_X11;
 }
 
 Command go_next() {
@@ -382,8 +390,8 @@ void load_config(Config config) {
   // Load streams
   state->stream_count = config.stream_count;
   for (int stream_i = 0; stream_i < config.stream_count; stream_i++) {
-    Window window = XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, BORDER_WIDTH, 0xffffff, 0);
-    XSelectInput(display, window, ButtonPressMask);
+    Window window = XCreateSimpleWindow(display, state->window, 0, 0, 1, 1, BORDER_WIDTH, BORDER_COLOR, 0);
+    XSelectInput(display, window, ButtonPressMask | EnterWindowMask);
     XSync(display, 0);
     mpv_handle *mpv = mpv_create();
 
@@ -454,6 +462,9 @@ void run() {
       case ClientMessage:
         if (event.xclient.data.l[0] == wm_delete_window)
           return;
+        break;
+      case EnterNotify:
+        root_command |= activate_window(event.xany.window);
         break;
       case KeyPress: {
         // fprintf(stderr, "KeyPress: %d\n", event.xkey.keycode);

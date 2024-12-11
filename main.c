@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 typedef enum {
   COMMAND_SYNC_X11 = 0x00000001,
@@ -32,9 +31,9 @@ typedef struct {
 } KeyMap;
 
 typedef struct {
-  char *name;
   Window window;
   mpv_handle *mpv;
+  char *name;
   char *main;
   char *sub;
   double speed;
@@ -45,18 +44,22 @@ typedef struct {
 } StreamState;
 
 typedef struct {
+  KeyMap key_map;
+
   Window window;
-  Window active_window;
-  Window fullscreen_window;
   int width;
   int height;
+
   View view;
   View default_view;
   const char *layout_file_path;
   LayoutFile layout_file;
+
+  Window active_stream_window;
+  Window fullscreen_stream_window;
   int stream_count;
   StreamState streams[MAX_STREAMS];
-  KeyMap key_map;
+
 } State;
 
 const static char *MPV_PROPERTY_DEMUXER_CACHE_TIME = "demuxer-cache-time";
@@ -146,11 +149,9 @@ void player_stop(int stream_i) {
 }
 
 void player_set_speed(int stream_i, double speed) {
-  int err = mpv_set_property(state->streams[stream_i].mpv, "speed",
-                             MPV_FORMAT_DOUBLE, &speed);
+  int err = mpv_set_property(state->streams[stream_i].mpv, "speed", MPV_FORMAT_DOUBLE, &speed);
   if (err < 0)
-    fprintf(stderr, "%s: failed to set speed: %d\n",
-            state->streams[stream_i].name, err);
+    fprintf(stderr, "%s: failed to set speed: %d\n", state->streams[stream_i].name, err);
 }
 
 Command update_size(int width, int height) {
@@ -164,20 +165,20 @@ Command toggle_fullscreen(Window window) {
     state->view = state->default_view;
   } else if (window) {
     state->view = VIEW_FULLSCREEN;
-    state->fullscreen_window = window;
-  } else if (state->fullscreen_window) {
+    state->fullscreen_stream_window = window;
+  } else if (state->fullscreen_stream_window) {
     state->view = VIEW_FULLSCREEN;
   } else if (state->stream_count > 0) {
     state->view = VIEW_FULLSCREEN;
-    state->fullscreen_window = state->streams[0].window;
+    state->fullscreen_stream_window = state->streams[0].window;
   }
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
 Command activate_window(Window window) {
-  if (window == state->active_window)
+  if (window == state->active_stream_window)
     return 0;
-  state->active_window = window;
+  state->active_stream_window = window;
   return COMMAND_SYNC_X11;
 }
 
@@ -186,13 +187,13 @@ Command go_next() {
 
   if (state->view == VIEW_FULLSCREEN)
     for (int i = 0; i < state->stream_count; i++)
-      if (state->streams[i].window == state->fullscreen_window) {
+      if (state->streams[i].window == state->fullscreen_stream_window) {
         index = i;
         break;
       }
 
   state->view = VIEW_FULLSCREEN;
-  state->fullscreen_window = state->streams[(index + 1) % state->stream_count].window;
+  state->fullscreen_stream_window = state->streams[(index + 1) % state->stream_count].window;
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
@@ -201,20 +202,20 @@ Command go_previous() {
 
   if (state->view == VIEW_FULLSCREEN)
     for (int i = 0; i < state->stream_count; i++)
-      if (state->streams[i].window == state->fullscreen_window) {
+      if (state->streams[i].window == state->fullscreen_stream_window) {
         index = i;
         break;
       }
 
   state->view = VIEW_FULLSCREEN;
-  state->fullscreen_window = state->streams[index - 1 >= 0 ? index - 1 : state->stream_count - 1].window;
+  state->fullscreen_stream_window = state->streams[index - 1 >= 0 ? index - 1 : state->stream_count - 1].window;
   return COMMAND_SYNC_X11 | COMMAND_SYNC_MPV;
 }
 
 int is_mpv_playing(int index) {
   switch (state->view) {
   case VIEW_FULLSCREEN:
-    return state->fullscreen_window == state->streams[index].window;
+    return state->fullscreen_stream_window == state->streams[index].window;
   case VIEW_GRID:
   case VIEW_LAYOUT:
     return 1;
@@ -239,7 +240,7 @@ void sync_mpv(int index) {
 
   switch (state->view) {
   case VIEW_FULLSCREEN: {
-    if (state->fullscreen_window == state->streams[index].window) {
+    if (state->fullscreen_stream_window == state->streams[index].window) {
       player_loadfile(index, state->streams[index].main);
       apply_mpv_flags_property(mpv, state->streams[index].main_mpv_flags);
     } else {
@@ -277,7 +278,7 @@ void sync_x11() {
   switch (state->view) {
   case VIEW_FULLSCREEN: {
     for (int i = 0; i < state->stream_count; i++) {
-      if (state->streams[i].window == state->fullscreen_window) {
+      if (state->streams[i].window == state->fullscreen_stream_window) {
         XWindowChanges changes = {.x = 0,
                                   .y = 0,
                                   .width = state->width,
@@ -289,6 +290,7 @@ void sync_x11() {
         XUnmapWindow(display, state->streams[i].window);
       }
     }
+
     break;
   }
   case VIEW_GRID: {
@@ -313,6 +315,7 @@ void sync_x11() {
         XMapWindow(display, state->streams[i].window);
       }
     }
+
     break;
   }
   case VIEW_LAYOUT: {
@@ -515,7 +518,7 @@ void run() {
         sub_command |= reload_mpv(stream_i);
 
       // Reset speed if stuck
-      if (time_now() > state->streams[stream_i].speed_updated_at + 5)
+      if (time_now() > state->streams[stream_i].speed_updated_at + MPV_TIMEOUT_SEC)
         sub_command |= update_mpv_speed(stream_i, 1.0);
 
       // mpv events
@@ -536,15 +539,12 @@ void run() {
             double *data = property->data;
             if (data) {
               state->streams[stream_i].pinged_at = time_now();
-              // fprintf(stderr, "property: %s: %f\n",
-              // MPV_PROPERTY_TIME_REMAINING,
-              //         *data);
+              // fprintf(stderr, "property: %s: %f\n", MPV_PROPERTY_TIME_REMAINING, *data);
             }
           } else if (strcmp(property->name, MPV_PROPERTY_DEMUXER_CACHE_TIME)) {
             double *data = property->data;
             if (data) {
-              // fprintf(stderr, "property: %s: %f\n",
-              //         MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
+              // fprintf(stderr, "property: %s: %f\n", MPV_PROPERTY_DEMUXER_CACHE_TIME, *data);
 
               if (*data > MPV_MAX_DELAY_SEC) {
                 sub_command |= update_mpv_speed(stream_i, 1.5);
@@ -555,9 +555,7 @@ void run() {
           }
           continue;
         }
-        // fprintf(stderr, "%s: unhandled mpv event: %s\n",
-        //         state->streams[stream_i].name,
-        //         mpv_event_name(mp_event->event_id));
+        // fprintf(stderr, "%s: unhandled mpv event: %s\n", state->streams[stream_i].name, mpv_event_name(mp_event->event_id));
       }
 
       // mpv side effects

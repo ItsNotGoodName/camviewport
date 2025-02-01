@@ -1,5 +1,7 @@
 # CamViewport
 
+![CamViewport on a TV](https://static.gurnain.com/github/camviewport/preview.png "Preview")
+
 Simple video wall for viewing IP cameras.
 
 X11 and mpv is used to display multiple low latency RTSP streams.
@@ -14,6 +16,8 @@ The preferred method is to use the [Ansible Role](https://github.com/ItsNotGoodN
 
 ## Requirements
 
+Not required if using the Ansible Role.
+
 ```
 sudo apt install xserver-xorg-core xinit libmpv2
 ```
@@ -27,7 +31,7 @@ Configuration file is at `camviewport.ini`.
 | Variables    | Description                                                                                                        | Example |
 | ------------ | ------------------------------------------------------------------------------------------------------------------ | ------- |
 | `layout`     | Layout file path                                                                                                   |
-| `key-*`      | Key binding where `*` is a X11 key without `XK_` prefix, see [Key Actions](#key-actions) for values                |         |
+| `key-*`      | Key binding where `*` is a X11 key without `XK_` prefix, see [Actions](#actions) for values                        |         |
 | `mpv-*`      | mpv option where `*` is the [mpv option](https://mpv.io/manual/master/#options)                                    |         |
 | `main-mpv-*` | mpv property where `*` is the [mpv property](https://mpv.io/manual/master/#properties) when main stream is playing |         |
 | `sub-mpv-*`  | mpv property where `*` is the [mpv property](https://mpv.io/manual/master/#properties) when sub stream is playing  |         |
@@ -42,15 +46,15 @@ Configuration file is at `camviewport.ini`.
 | `main-mpv-*` | See [Global Variables](#global-variables)                                      |         |
 | `sub-mpv-*`  | See [Global Variables](#global-variables)                                      |         |
 
-### Key Actions
+### Actions
 
-| Key     | Action     | Description            |
-| ------- | ---------- | ---------------------- |
-| `q`     | `quit`     | Close the program      |
-| `r`     | `reload`   | Reload the layout file |
-| `space` | `home`     | Toggle fullscreen      |
-| `l`     | `next`     | Go to next pane        |
-| `h`     | `previous` | Go to previous pane    |
+| Action     | Default Key | Description            |
+| ---------- | ----------- | ---------------------- |
+| `quit`     | `q`         | Close the program      |
+| `reload`   | `r`         | Reload the layout file |
+| `home`     | `space`     | Toggle fullscreen      |
+| `next`     | `l`         | Go to next pane        |
+| `previous` | `h`         | Go to previous pane    |
 
 ### Example
 

@@ -1,8 +1,8 @@
 # CamViewport
 
-![CamViewport on a TV](https://static.gurnain.com/github/camviewport/preview.png "Preview")
-
 Simple video wall for viewing IP cameras.
+
+![CamViewport on a TV](https://static.gurnain.com/github/camviewport/preview.png "Preview")
 
 X11 and mpv is used to display multiple low latency RTSP streams.
 Each stream is a X11 window with a mpv player embedded through the `--wid` mpv option.

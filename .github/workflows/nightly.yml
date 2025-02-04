@@ -33,13 +33,7 @@ jobs:
           submodules: true
 
       - name: Build
-        run: |
-          sudo apt update -y 
-          sudo apt install -y libmpv-dev
-          make nightly
-          mkdir dist
-          cp camviewport dist/camviewport_Linux_X86_64
-          tar -czf dist/layouts.tar.gz layouts
+        run: make workflow-build
 
       - name: Publish nightly
         env:
@@ -48,4 +42,4 @@ jobs:
         run: |
           gh release delete nightly --yes || true
           git push origin :nightly || true
-          gh release create --prerelease --title "Nightly $(date +'%Y-%m-%d')" --notes "" --target $GITHUB_SHA nightly dist/*
+          gh release create --prerelease --title "Nightly $(date +'%Y-%m-%d')" --notes-from-tag --target $GITHUB_SHA nightly dist/*

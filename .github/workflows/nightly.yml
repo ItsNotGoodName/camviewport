@@ -7,7 +7,7 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       nightly: ${{ steps.nightly.outputs.nightly }}
     steps:
@@ -20,11 +20,11 @@ jobs:
         name: Check if current branch is nightly
         run: (git tag --points-at HEAD | grep -wq "nightly" && echo "nightly=true") || echo "nightly=false" >> $GITHUB_OUTPUT
 
-  nightly:
+  create:
     needs: [check]
     if: ${{ needs.check.outputs.nightly == 'false' }}
     permissions: write-all
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,10 +32,15 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Build
-        run: make workflow-build
+      - name: Build x86_64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
+          mkdir -p dist
+          tar -czf dist/layouts.tar.gz layouts
+          make build
 
-      - name: Publish nightly
+      - name: Create release
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,3 +48,65 @@ jobs:
           gh release delete nightly --yes || true
           git push origin :nightly || true
           gh release create --prerelease --title "Nightly $(date +'%Y-%m-%d')" --notes-from-tag --target $GITHUB_SHA nightly dist/*
+
+  build:
+    needs: [create]
+    name: Build on ${{ matrix.distro }} ${{ matrix.arch }}
+    permissions: write-all
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            distro: bookworm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - uses: uraimo/run-on-arch-action@v3
+        name: Build other architectures
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+
+          # Not required, but speeds up builds
+          githubToken: ${{ github.token }}
+
+          # Create an dist directory
+          setup: |
+            mkdir -p "${PWD}/dist"
+
+          # Mount the dist directory as /dist in the container
+          dockerRunArgs: |
+            --volume "${PWD}/dist:/dist"
+
+          # Pass some environment variables to the container
+          env: | # YAML, but pipe character is necessary
+            VERSION: nightly
+
+          # The shell to run commands with in the container
+          shell: /bin/sh
+
+          # Install some dependencies in the container. This speeds up builds if
+          # you are also using githubToken. Any dependencies installed here will
+          # be part of the container image that gets cached, so subsequent
+          # builds don't have to re-install them. The image layer is cached
+          # publicly in your project's package repository, so it is vital that
+          # no secrets are present in the container state or logs.
+          install: |
+            apt-get update
+            apt-get install -y build-essential libmpv-dev
+
+          # Produce a binary artifact and place it in the mounted volume
+          run: |
+            make build
+
+      - name: Upload dist
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload nightly dist/*

@@ -8,7 +8,7 @@ on:
 jobs:
   create:
     permissions: write-all
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,17 +30,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create --draft --generate-notes --target $GITHUB_SHA $VERSION dist/*
+
   build:
     needs: [create]
-    name: Build on ${{ matrix.distro }} ${{ matrix.arch }}
-    runs-on: ubuntu-24.04
+    name: Build on ${{ matrix.arch }}
+    permissions: write-all
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          - arch: aarch64
-            distro: bullseye
-          - arch: x86_64
-            distro: bullseye
+          - os: ubuntu-22.04
+            arch: amd64
+          - os: ubuntu-22.04-arm
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,49 +50,18 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - uses: uraimo/run-on-arch-action@v3
-        name: Build artifact
-        id: build
-        with:
-          arch: ${{ matrix.arch }}
-          distro: ${{ matrix.distro }}
-          base_image: ${{ matrix.base_image }}
+      - name: Set version
+        run: echo "VERSION=$(git tag --points-at HEAD)" >> $GITHUB_ENV
 
-          # Not required, but speeds up builds
-          githubToken: ${{ github.token }}
-
-          # Create an dist directory
-          setup: |
-            mkdir -p "${PWD}/dist"
-
-          # Mount the dist directory as /dist in the container
-          dockerRunArgs: |
-            --volume "${PWD}/dist:/dist"
-
-          # Pass some environment variables to the container
-          env: | # YAML, but pipe character is necessary
-            VERSION: ${VERSION}
-
-          # The shell to run commands with in the container
-          shell: /bin/sh
-
-          # Install some dependencies in the container. This speeds up builds if
-          # you are also using githubToken. Any dependencies installed here will
-          # be part of the container image that gets cached, so subsequent
-          # builds don't have to re-install them. The image layer is cached
-          # publicly in your project's package repository, so it is vital that
-          # no secrets are present in the container state or logs.
-          install: |
-            apt-get install -y libmpv-dev
-
-          # Produce a binary artifact and place it in the mounted volume
-          run: |
-            make build
-            cp ./dist/* "/dist/"
+      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv-dev
+          make build
 
       - name: Upload dist
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload --target $GITHUB_SHA $VERSION dist/*
+          gh release upload $VERSION dist/*
